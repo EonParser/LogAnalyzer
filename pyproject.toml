@@ -8,7 +8,6 @@ version = "0.1.0"
 description = "A robust and scalable log analyzer for processing large log files"
 readme = "README.md"
 requires-python = ">=3.8"
-license = "MIT"
 authors = [
     { name = "Sneh Patel", email = "supatel5678.90@gmail.com" }
 ]
@@ -21,7 +20,7 @@ dependencies = [
     "uvicorn>=0.15.0",
     "rich>=10.0.0",
     "python-multipart>=0.0.5",
-    "pydantic==1.8.0",
+    "pydantic>=1.9,<3.0",
     "aiofiles>=0.7.0",
     "pytest==7.0.0"
 ]
