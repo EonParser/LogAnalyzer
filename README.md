@@ -1,152 +1,171 @@
-# Log Analyzer
+# Log Analyzer Documentation
 
-A powerful, production-grade log analysis tool with both CLI and web interfaces.
+## Project Overview
+The Log Analyzer is a production-grade tool designed to analyze various types of log files efficiently. It features both a web interface and CLI capabilities, supporting multiple log formats and offering real-time analysis.
 
-## Features
+## Architecture
 
-- **Multi-format Support**: Parse Apache, Nginx, Syslog, and custom log formats
-- **Efficient Processing**: Handle large log files with streaming and concurrent processing
-- **Flexible Pipeline**: Configurable processing steps for filtering and transformation
-- **Multiple Interfaces**: 
-  - CLI for command-line operations
-  - Web interface for visual analysis
-  - API for integration
-- **Rich Analysis**: 
-  - Pattern detection
-  - Error analysis
-  - Performance metrics
-  - Custom filtering
+### Core Components
 
-## Installation
-
-```bash
-pip install log-analyzer
+1. **Log Parser Framework**
+```python
+class LogAnalyzer:
+    def __init__(self, parser_factory: Optional[ParserFactory] = None):
+        self.parser_factory = parser_factory or ParserFactory()
+        self.reader = LogReader()
 ```
+- Central component that coordinates parsing and analysis
+- Uses Factory pattern for extensible parser management
+- Efficient file reading with streaming capabilities
 
-## Quick Start
-
-### Command Line Usage
-
-```bash
-# Analyze a single log file
-loganalyzer analyze access.log
-
-# Analyze multiple files with filtering
-loganalyzer analyze --parser apache --filter "level=='ERROR'" *.log
-
-# Scan directory for log files
-loganalyzer scan /var/log
-
-# Follow log file in real-time
-loganalyzer tail -f /var/log/apache2/access.log
+2. **Parser System**
+```python
+class BaseParser(ABC):
+    @abstractmethod
+    def parse_line(self, line: str) -> Optional[LogEntry]:
+        pass
 ```
+- Abstract base class for all parsers
+- Supports multiple formats (Apache, Nginx, Syslog, Custom)
+- Easy to extend for new log formats
+
+3. **Processing Pipeline**
+```python
+class Pipeline:
+    def __init__(self):
+        self.steps = []
+        self._preprocessors = []
+        self._postprocessors = []
+```
+- Modular processing system
+- Supports filtering, transformation, and enrichment
+- Can be customized per analysis
 
 ### Web Interface
 
-```bash
-# Start web server
-loganalyzer-web
+1. **FastAPI Backend**
+```python
+@app.post("/analyze")
+async def analyze_logs(
+    background_tasks: BackgroundTasks,
+    files: List[UploadFile] = File(...),
+    parser: Optional[str] = Form(None),
+    filters: Optional[str] = Form(None)
+):
+```
+- RESTful API endpoints
+- Asynchronous processing
+- Background task handling
 
-# Open http://localhost:8000 in your browser
+2. **Frontend**
+```html
+<div class="container mx-auto px-4 py-8">
+    <!-- Upload Form -->
+    <div class="bg-white rounded-lg shadow p-6 mb-8">
+        <h2 class="text-xl font-semibold mb-4">Analyze Logs</h2>
+        <form id="uploadForm">...</form>
+    </div>
+</div>
+```
+- Modern, responsive UI using Tailwind CSS
+- Real-time updates
+- Interactive results display
+
+## Key Features
+
+### 1. Multi-format Support
+- Auto-detection of log formats
+- Built-in parsers for common formats
+- Custom parser support for specialized formats
+
+### 2. Performance Optimization
+```python
+def read_lines(self, file_path: Union[str, Path]) -> Iterator[str]:
+    with open(path, 'rb') as f:
+        with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+```
+- Memory-mapped file reading
+- Streaming processing
+- Concurrent analysis for multiple files
+
+### 3. Error Handling
+```python
+try:
+    entry = parser.parse_line(line)
+    if entry:
+        self.metrics.process_entry(entry)
+except Exception as e:
+    self.metrics.record_error(str(e))
+```
+- Robust error detection
+- Detailed error reporting
+- Graceful failure handling
+
+### 4. Extensibility
+```python
+class CustomParser(BaseParser):
+    def supports_format(self, line: str) -> bool:
+        return True  # Custom logic here
+```
+- Plugin architecture for parsers
+- Custom pipeline processors
+- Configurable metrics collection
+
+## Usage Examples
+
+### Web Interface
+1. Upload logs:
+```javascript
+document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new FormData();
+    // File handling...
+});
 ```
 
-### Python API
+2. View results:
+```javascript
+function displayResults(container, results) {
+    const content = results.map(file => `
+        <div class="border rounded-lg p-4">
+            <h3>${file.filename}</h3>
+            // Result display...
+        </div>
+    `);
+}
+```
 
-```python
-from log_analyzer import LogAnalyzer
-from log_analyzer.processors.pipeline import Pipeline
-
-# Initialize analyzer
-analyzer = LogAnalyzer()
-
-# Create processing pipeline
-pipeline = Pipeline()
-pipeline.add_step(lambda entry: entry.level == 'ERROR')
-
-# Analyze logs
-results = analyzer.analyze_file('access.log', pipeline=pipeline)
+### CLI Usage
+```bash
+loganalyzer analyze access.log --parser apache
+loganalyzer scan /var/log --pattern "*.log"
 ```
 
 ## Configuration
 
-Configuration can be provided via:
-- Config file (JSON/YAML)
-- Environment variables
-- Command line options
-
-Example config.json:
-```json
-{
-    "parsing": {
-        "chunk_size": 8192,
-        "max_line_length": 1048576
+### Environment Variables
+```python
+DEFAULT_CONFIG = {
+    'parsing': {
+        'chunk_size': 8192,
+        'max_line_length': 1048576
     },
-    "processing": {
-        "max_workers": 4,
-        "batch_size": 1000
+    'processing': {
+        'max_workers': 4
     }
 }
 ```
 
-## Architecture
-
-The system consists of several key components:
-
-1. **Core Parser Framework**
-   - Extensible parser interface
-   - Streaming file processing
-   - Memory-efficient handling
-
-2. **Processing Pipeline**
-   - Configurable processing steps
-   - Filter and transform operations
-   - Concurrent processing
-
-3. **User Interfaces**
-   - CLI with rich output
-   - Web interface with real-time updates
-   - RESTful API
-
-4. **Utilities**
-   - File handling
-   - String processing
-   - Configuration management
-
-## Development
-
-### Setup Development Environment
-
-```bash
-# Clone repository
-git clone https://github.com/yourusername/log-analyzer.git
-cd log-analyzer
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install development dependencies
-pip install -e .[dev]
-
-# Install pre-commit hooks
-pre-commit install
+### File-based Configuration
+```json
+{
+    "parsing": {
+        "chunk_size": 16384
+    }
+}
 ```
 
-### Running Tests
-
-```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=log_analyzer
-
-# Run specific test file
-pytest tests/test_parsers/test_apache.py
-```
-
-### Project Structure
-
+## Project Structure
 ```
 log-analyzer/
 ├── src/
@@ -162,30 +181,43 @@ log-analyzer/
 └── examples/            # Example usage
 ```
 
-## Contributing
+## Development Workflow
 
-Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) for details.
-
-### Adding New Parser
-
-1. Create new parser class:
-```python
-from log_analyzer.parsers.base import BaseParser
-
-class CustomParser(BaseParser):
-    def supports_format(self, line: str) -> bool:
-        return line.startswith('CUSTOM')
-        
-    def parse_line(self, line: str) -> Optional[LogEntry]:
-        # Parse line
-        return LogEntry(...)
+1. **Setup**
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install -e .[dev]
 ```
 
-2. Register parser:
-```python
-analyzer.parser_factory.register_parser('custom', CustomParser)
+2. **Testing**
+```bash
+pytest --cov=log_analyzer
 ```
 
-## License
+3. **Running**
+```bash
+uvicorn log_analyzer.web.app:app --reload
+```
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## Future Enhancements
+
+1. **Visualization**
+- Add charts and graphs
+- Timeline views
+- Pattern detection visualization
+
+2. **Analysis Features**
+- Machine learning integration
+- Anomaly detection
+- Pattern matching
+
+3. **Performance**
+- Distributed processing
+- Caching layer
+- Stream processing
+
+4. **Integration**
+- Export capabilities
+- API integrations
+- Alert system
