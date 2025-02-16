@@ -75,7 +75,7 @@ class ApacheLogParser(BaseParser):
 class ApacheErrorLogParser(BaseParser):
     """Parser for Apache/HTTPD error logs"""
 
-    PATTERN = r"\[(?P<timestamp>.*?)\] \[(?P<level>\w+)\] (?P<message>.*)"
+    PATTERN = r"\[(?P<timestamp>[\w\s:]+)\] \[(?P<level>\w+)\] (?P<message>.*)"
 
     def __init__(self):
         self.regex = re.compile(self.PATTERN)
@@ -85,17 +85,7 @@ class ApacheErrorLogParser(BaseParser):
         return bool(self.regex.match(line))
 
     def parse_line(self, line: str) -> Optional[LogEntry]:
-        """Parse an Apache error log line
-
-        Args:
-            line: Raw log line to parse
-
-        Returns:
-            LogEntry if successful, None if line should be skipped
-
-        Raises:
-            ParserError: If line cannot be parsed
-        """
+        """Parse an Apache error log line"""
         match = self.regex.match(line)
         if not match:
             raise ParserError(f"Line does not match Apache error format: {line}")
@@ -104,11 +94,11 @@ class ApacheErrorLogParser(BaseParser):
 
         try:
             # Parse timestamp
-            timestamp = datetime.strptime(data["timestamp"], "%a %b %d %H:%M:%S.%f %Y")
+            timestamp = datetime.strptime(data["timestamp"], "%a %b %d %H:%M:%S %Y")
 
             return LogEntry(
                 timestamp=timestamp,
-                level=data["level"],
+                level=data["level"].upper(),
                 message=data["message"],
                 source="apache",
                 raw_data=line,

@@ -25,6 +25,8 @@
             const [loading, setLoading] = React.useState(false);
             const [results, setResults] = React.useState(null);
             const [error, setError] = React.useState(null);
+            const [parser, setParser] = React.useState('');
+            const [filters, setFilters] = React.useState('');
 
             const handleFileChange = (e) => {
                 const selectedFiles = Array.from(e.target.files);
@@ -56,6 +58,12 @@
                     files.forEach(file => {
                         formData.append('files', file);
                     });
+                    if (parser) {
+                        formData.append('parser', parser);
+                    }
+                    if (filters) {
+                        formData.append('filters', filters);
+                    }
 
                     const response = await fetch('/analyze', {
                         method: 'POST',
@@ -145,10 +153,11 @@
                         className: 'space-y-4',
                         key: 'form'
                     }, [
-                        React.createElement('div', { key: 'input-group' }, [
+                        // File Input Group
+                        React.createElement('div', { key: 'file-group' }, [
                             React.createElement('label', { 
                                 className: 'block text-sm font-medium text-gray-700 mb-2',
-                                key: 'label'
+                                key: 'file-label'
                             }, 'Log Files'),
                             React.createElement('input', {
                                 type: 'file',
@@ -156,23 +165,59 @@
                                 multiple: true,
                                 accept: '.log,.txt',
                                 className: 'block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100',
-                                key: 'input'
-                            }),
-                            React.createElement('div', { 
-                                className: 'mt-4',
-                                key: 'details'
+                                key: 'file-input'
+                            })
+                        ]),
+
+                        // Parser Selection Group
+                        React.createElement('div', { key: 'parser-group' }, [
+                            React.createElement('label', {
+                                className: 'block text-sm font-medium text-gray-700 mb-2',
+                                key: 'parser-label'
+                            }, 'Parser'),
+                            React.createElement('select', {
+                                className: 'block w-full rounded-md border border-gray-300 shadow-sm p-2',
+                                value: parser,
+                                onChange: (e) => setParser(e.target.value),
+                                key: 'parser-select'
                             }, [
-                                files.length > 0 && React.createElement('div', {
-                                    className: 'text-sm text-gray-500 mb-4',
-                                    key: 'file-count'
-                                }, `${files.length} file(s) selected`),
-                                React.createElement('button', {
-                                    type: 'submit',
-                                    disabled: loading || files.length === 0,
-                                    className: 'w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50',
-                                    key: 'submit'
-                                }, loading ? 'Analyzing...' : 'Analyze Logs')
+                                React.createElement('option', { value: '', key: 'auto' }, 'Auto-detect'),
+                                React.createElement('option', { value: 'apache_access', key: 'apache' }, 'Apache Access Log'),
+                                React.createElement('option', { value: 'apache_error', key: 'apache-error' }, 'Apache Error Log'),
+                                React.createElement('option', { value: 'nginx_access', key: 'nginx' }, 'Nginx Access Log'),
+                                React.createElement('option', { value: 'nginx_error', key: 'nginx-error' }, 'Nginx Error Log'),
+                                React.createElement('option', { value: 'syslog', key: 'syslog' }, 'Syslog')
                             ])
+                        ]),
+
+                        // Filters Group
+                        React.createElement('div', { key: 'filter-group' }, [
+                            React.createElement('label', {
+                                className: 'block text-sm font-medium text-gray-700 mb-2',
+                                key: 'filter-label'
+                            }, 'Filters'),
+                            React.createElement('input', {
+                                type: 'text',
+                                placeholder: "e.g. level=='ERROR'",
+                                className: 'block w-full rounded-md border border-gray-300 shadow-sm p-2',
+                                value: filters,
+                                onChange: (e) => setFilters(e.target.value),
+                                key: 'filter-input'
+                            })
+                        ]),
+
+                        // File Count and Submit Button
+                        React.createElement('div', { key: 'submit-group' }, [
+                            files.length > 0 && React.createElement('div', {
+                                className: 'text-sm text-gray-500 mb-4',
+                                key: 'file-count'
+                            }, `${files.length} file(s) selected`),
+                            React.createElement('button', {
+                                type: 'submit',
+                                disabled: loading || files.length === 0,
+                                className: 'w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50',
+                                key: 'submit'
+                            }, loading ? 'Analyzing...' : 'Analyze Logs')
                         ])
                     ]),
                     error && React.createElement('div', {

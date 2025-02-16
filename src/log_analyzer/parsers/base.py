@@ -62,28 +62,24 @@ class ParserFactory:
         self._parsers: Dict[str, type[BaseParser]] = {}
 
     def register_parser(self, name: str, parser_class: type[BaseParser]) -> None:
-        """Register a new parser class
-
-        Args:
-            name: Unique name for the parser
-            parser_class: Parser class to register
-        """
+        """Register a new parser class"""
         self._parsers[name] = parser_class
 
-    def get_parser(self, name: str) -> BaseParser:
-        """Get a parser instance by name
+    def get_parser(self, name: str) -> Optional[BaseParser]:
+        """Get a parser instance by name"""
+        try:
+            parser_class = self._parsers[name]
+            return parser_class()
+        except KeyError:
+            available_parsers = ", ".join(self._parsers.keys())
+            raise ValueError(f"Parser '{name}' not found. Available parsers: {available_parsers}")
 
-        Args:
-            name: Name of the parser to get
-
-        Returns:
-            Instance of the requested parser
-
-        Raises:
-            KeyError: If parser name not found
-        """
-        parser_class = self._parsers[name]
-        return parser_class()
+    def list_parsers(self) -> Dict[str, str]:
+        """Get list of available parsers and their descriptions"""
+        return {
+            name: parser_class.__doc__ or "No description"
+            for name, parser_class in self._parsers.items()
+        }
 
     def detect_parser(self, sample_line: str) -> Optional[BaseParser]:
         """Auto-detect appropriate parser for a log line

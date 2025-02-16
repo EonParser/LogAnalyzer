@@ -1,4 +1,5 @@
 import asyncio
+from collections import defaultdict
 import json
 import logging
 import shutil
@@ -12,14 +13,15 @@ from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadF
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from log_analyzer.parsers.syslog import SyslogParser
 from pydantic import BaseModel
 
 from ..core.analyzer import LogAnalyzer
-from ..parsers.apache import ApacheLogParser
+from ..parsers.apache import ApacheErrorLogParser, ApacheLogParser
 from ..parsers.base import ParserFactory, SimpleLineParser
 from ..parsers.custom import IncidentLogParser
-from ..parsers.nginx import NginxAccessLogParser
-from ..processors.pipeline import Pipeline
+from ..parsers.nginx import NginxAccessLogParser, NginxErrorLogParser
+from ..processors.pipeline import FilterStep, Pipeline
 from ..processors.transformers import TransformerFactory
 
 app = FastAPI(title="Log Analyzer API")
@@ -42,15 +44,21 @@ analyzer.parser_factory.register_parser("nginx", NginxAccessLogParser)
 tasks: Dict[str, Dict[str, Any]] = {}
 
 
-# Create analyzer with SimpleLineParser
 def create_analyzer():
     """Create and configure analyzer instance"""
     parser_factory = ParserFactory()
-    parser_factory.register_parser("simple", SimpleLineParser)
+    
+    # Register parser classes for different log formats
+    parser_factory.register_parser("apache_access", ApacheLogParser)  # For access logs
+    parser_factory.register_parser("apache_error", ApacheErrorLogParser)  # For error logs
+    parser_factory.register_parser("nginx_access", NginxAccessLogParser)
+    parser_factory.register_parser("nginx_error", NginxErrorLogParser)
+    parser_factory.register_parser("syslog", SyslogParser)
+    parser_factory.register_parser("simple", SimpleLineParser)  # Fallback parser
+    
     return LogAnalyzer(parser_factory=parser_factory)
 
-
-# Use the create_analyzer function
+# Initialize the analyzer
 analyzer = create_analyzer()
 
 
@@ -114,14 +122,10 @@ async def analyze_logs(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def process_logs(
-    task_id: str,
-    saved_files: List[dict],
-    parser_name: Optional[str],
-    filters: Optional[List[str]],
-):
+async def process_logs(task_id: str, saved_files: List[dict], parser_name: Optional[str], filters: Optional[List[str]]):
     """Process logs in background"""
     try:
+        logging.info(f"Starting processing task {task_id}")
         tasks[task_id]["status"] = "processing"
 
         # Create pipeline if needed
@@ -137,48 +141,78 @@ async def process_logs(
         results = []
         for file_info in saved_files:
             try:
-                # Analyze the saved file
-                file_results = analyzer.analyze_file(
-                    file_info["path"], parser_name=parser_name, pipeline=pipeline
-                )
-
-                results.append(
-                    {"filename": file_info["filename"], "results": file_results}
-                )
+                logging.info(f"Processing file {file_info['filename']}")
+                
+                try:
+                    # Analyze the saved file
+                    file_results = analyzer.analyze_file(
+                        file_info["path"], 
+                        parser_name=parser_name, 
+                        pipeline=pipeline
+                    )
+                    
+                    logging.info(f"Analysis complete for {file_info['filename']}")
+                    results.append({
+                        "filename": file_info["filename"],
+                        "results": file_results
+                    })
+                except ValueError as e:
+                    raise ValueError(f"Error analyzing {file_info['filename']}: {str(e)}")
 
             finally:
-                # Clean up the temp file
+                # Clean up temp file
                 try:
                     file_info["path"].unlink()
                 except:
                     pass
 
-        # Update task with results
-        tasks[task_id].update(
-            {"status": "completed", "completed_at": datetime.now(), "results": results}
-        )
+        if not results:
+            raise ValueError("No files were successfully processed")
+
+        # The metrics are already properly structured in our results
+        # We just need to combine them from multiple files if needed
+        combined_results = {
+            'summary': results[0]['results']['summary'],  # Use first file's summary as base
+            'http_analysis': results[0]['results']['http_analysis'],
+            'error_analysis': results[0]['results']['error_analysis'],
+            'security_analysis': results[0]['results']['security_analysis'],
+            'performance_metrics': results[0]['results']['performance_metrics'],
+            'time_analysis': results[0]['results']['time_analysis']
+        }
+
+        # If there are multiple files, aggregate the metrics
+        if len(results) > 1:
+            combined_results['summary'].update({
+                'total_entries': sum(r['results']['summary']['total_entries'] for r in results),
+                'error_rate': f"{sum(float(r['results']['summary']['error_rate'].rstrip('%')) for r in results)/len(results):.1f}%",
+                'average_response_time': f"{sum(float(r['results']['summary']['average_response_time'].rstrip('ms')) for r in results)/len(results):.0f}ms",
+                'unique_ips': sum(r['results']['summary']['unique_ips'] for r in results)
+            })
+
+        tasks[task_id].update({
+            "status": "completed",
+            "completed_at": datetime.now(),
+            "results": combined_results
+        })
+        logging.info(f"Task {task_id} completed successfully")
 
     except Exception as e:
         logging.exception("Error processing logs")
-        tasks[task_id].update(
-            {"status": "failed", "completed_at": datetime.now(), "error": str(e)}
-        )
-    finally:
-        # Clean up any remaining temp files
-        for file_info in saved_files:
-            try:
-                if file_info["path"].exists():
-                    file_info["path"].unlink()
-            except:
-                pass
-
+        tasks[task_id].update({
+            "status": "failed",
+            "completed_at": datetime.now(),
+            "error": str(e)
+        })
 
 @app.get("/tasks/{task_id}")
 async def get_task_status(task_id: str):
     """Get task status and results"""
     if task_id not in tasks:
         raise HTTPException(status_code=404, detail="Task not found")
-
+    
+    logging.info(f"Getting status for task {task_id}")
+    logging.info(f"Task data: {tasks[task_id]}")
+    
     return tasks[task_id]
 
 

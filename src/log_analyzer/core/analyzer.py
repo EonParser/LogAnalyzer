@@ -1,13 +1,14 @@
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from ..parsers.base import BaseParser, LogEntry, ParserFactory
 from ..processors.pipeline import Pipeline
 from .metrics import MetricsCollector
-from .reader import LogReader, MultiFileReader
+from .reader import LogReader
 
 
 class LogAnalyzer:
@@ -37,37 +38,59 @@ class LogAnalyzer:
         self._processors.append(processor)
 
     def analyze_file(
-        self,
-        file_path: Path,
-        parser_name: Optional[str] = None,
-        pipeline: Optional[Pipeline] = None,
-    ) -> Dict[str, Any]:
-        """Analyze a single log file
+            self,
+            file_path: Path,
+            parser_name: Optional[str] = None,
+            pipeline: Optional[Pipeline] = None,
+        ) -> Dict[str, Any]:
+            """Analyze a single log file
 
-        Args:
-            file_path: Path to log file
-            parser_name: Name of parser to use, or None for auto-detect
-            pipeline: Optional processing pipeline
+            Args:
+                file_path: Path to log file
+                parser_name: Name of parser to use, or None for auto-detect
+                pipeline: Optional processing pipeline
 
-        Returns:
-            Dictionary of analysis results
+            Returns:
+                Dictionary of analysis results
 
-        Raises:
-            ValueError: If no suitable parser found
-        """
-        # Get first line to detect format if needed
-        first_line = next(self.reader.read_lines(file_path))
+            Raises:
+                ValueError: If no suitable parser found
+            """
+            try:
+                # Get first line to detect format if needed
+                first_line = next(self.reader.read_lines(file_path))
 
-        parser = (
-            self.parser_factory.get_parser(parser_name)
-            if parser_name
-            else self.parser_factory.detect_parser(first_line)
-        )
+                # Get appropriate parser
+                parser = None
+                if parser_name:
+                    try:
+                        parser = self.parser_factory.get_parser(parser_name)
+                    except ValueError as e:
+                        raise ValueError(f"Invalid parser specified: {str(e)}")
+                else:
+                    # Try all registered parsers
+                    for name, parser_class in self.parser_factory._parsers.items():
+                        if name != "simple":  # Skip the simple parser for auto-detect
+                            try:
+                                test_parser = parser_class()
+                                if test_parser.supports_format(first_line):
+                                    parser = test_parser
+                                    break
+                            except:
+                                continue
 
-        if not parser:
-            raise ValueError(f"No suitable parser found for {file_path}")
+                    # Fall back to simple parser if no other parser works
+                    if not parser:
+                        parser = self.parser_factory.get_parser("simple")
 
-        return self._analyze_with_parser(file_path, parser, pipeline)
+                if not parser:
+                    raise ValueError(f"No suitable parser found for {file_path}")
+
+                return self._analyze_with_parser(file_path, parser, pipeline)
+                
+            except Exception as e:
+                logging.exception(f"Error analyzing file {file_path}")
+                raise ValueError(f"Error analyzing file: {str(e)}")
 
     def analyze_directory(
         self,
@@ -87,45 +110,58 @@ class LogAnalyzer:
         Returns:
             Combined analysis results
         """
-        results = defaultdict(list)
+        results = {
+        'files': [],
+        'errors': [],
+        'summary': {
+            'total_files': 0,
+            'successful': 0,
+            'failed': 0
+        }
+    }
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            files = list(directory.glob(pattern))  # Get files first
+            results['summary']['total_files'] = len(files)
+            
             futures = []
-
-            for path in directory.glob(pattern):
+            for path in files:
                 future = executor.submit(self.analyze_file, path, parser_name, pipeline)
                 futures.append((path, future))
 
             for path, future in futures:
                 try:
                     file_results = future.result()
-                    for key, value in file_results.items():
-                        results[key].append((path, value))
+                    results['files'].append({
+                        'path': str(path),
+                        'results': file_results
+                    })
+                    results['summary']['successful'] += 1
                 except Exception as e:
-                    results["errors"].append((path, str(e)))
+                    results['errors'].append({
+                        'path': str(path),
+                        'error': str(e)
+                    })
+                    results['summary']['failed'] += 1
 
-        return dict(results)
+        return results
 
-    def _analyze_with_parser(
-        self, file_path: Path, parser: BaseParser, pipeline: Optional[Pipeline] = None
-    ) -> Dict[str, Any]:
+    def _analyze_with_parser(self, file_path: Path, parser: BaseParser, pipeline: Optional[Pipeline] = None) -> Dict[str, Any]:
         """Analyze a file using a specific parser"""
         self.metrics.reset()
-
-        for line in self.reader.read_lines(file_path):
-            try:
-                entry = parser.parse_line(line)
-                if entry:
-                    # Process through pipeline if provided
-                    if pipeline:
-                        entry = pipeline.process(entry)
-                        if not entry:  # Entry was filtered out
-                            continue
-
-                    self.metrics.process_entry(entry)
-                    for processor in self._processors:
-                        processor(entry)
-            except Exception as e:
-                self.metrics.record_error(str(e))
-
-        return self.metrics.get_results()
+        
+        try:
+            for line in self.reader.read_lines(file_path):
+                try:
+                    entry = parser.parse_line(line)
+                    if entry:
+                        if pipeline:
+                            entry = pipeline.process(entry)
+                            if not entry:  # Entry was filtered out
+                                continue
+                        self.metrics.process_entry(entry)
+                except Exception as e:
+                    self.metrics.record_error(str(e))
+        finally:
+            self.metrics.finish_processing()
+            return self.metrics.get_results()
