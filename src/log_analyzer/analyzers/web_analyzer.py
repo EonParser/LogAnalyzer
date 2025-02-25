@@ -1,8 +1,6 @@
-
+from ..core.metrics import MetricsCollector
 from typing import Dict, Any
 import re
-
-from log_analyzer.core.metrics import MetricsCollector
 
 class WebLogAnalyzer:
     """Specialized analyzer for web logs"""
