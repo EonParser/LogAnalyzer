@@ -70,74 +70,6 @@ class MetricsCollector:
         # User agent tracking
         self._user_agents: Dict[str, int] = defaultdict(int)
 
-    def _update_timestamps(self, timestamp: datetime) -> None:
-        """Update timestamp tracking"""
-        if not self._first_timestamp or timestamp < self._first_timestamp:
-            self._first_timestamp = timestamp
-        if not self._last_timestamp or timestamp > self._last_timestamp:
-            self._last_timestamp = timestamp
-            
-        # Update hourly counts
-        hour_key = timestamp.strftime('%Y-%m-%d %H:00')
-        self._hourly_counts[hour_key] += 1
-        
-    def _process_syslog(self, entry: LogEntry) -> None:
-        """Process syslog entries"""
-        # Track error levels
-        if entry.level in ('ERROR', 'CRITICAL', 'FATAL', 'SEVERE'):
-            self._error_types[entry.level] += 1
-            error_message = entry.message.strip()
-            if error_message:
-                self._error_patterns[error_message] += 1
-        
-        # Track services/programs
-        service = entry.metadata.get('service', entry.source)
-        if service:
-            if entry.level in ('ERROR', 'CRITICAL', 'FATAL', 'SEVERE'):
-                self._service_errors[service] += 1
-
-    def _process_application_log(self, entry: LogEntry) -> None:
-        """Process application log entries"""
-        # Track error patterns and types
-        if entry.level in ('ERROR', 'CRITICAL', 'FATAL', 'SEVERE'):
-            self._error_types[entry.level] += 1
-            error_message = entry.message.strip()
-            if error_message:
-                self._error_patterns[error_message] += 1
-        
-        # Track any performance metrics if available
-        response_time = entry.parsed_data.get('response_time')
-        if response_time:
-            self._response_times.append(float(response_time))
-        
-        # Track service metrics
-        service = entry.metadata.get('service', entry.source)
-        if service:
-            if entry.level in ('ERROR', 'CRITICAL', 'FATAL', 'SEVERE'):
-                self._service_errors[service] += 1
-                
-    def _add_request_metric(self, entry: LogEntry) -> None:
-        """Add a request metric from a log entry"""
-        data = entry.parsed_data
-        
-        request = RequestMetric(
-            endpoint=data.get('path', ''),
-            status_code=data.get('status_code', 0),
-            response_time=data.get('bytes_sent', 0),  # Using bytes as proxy for response time
-            timestamp=entry.timestamp,
-            ip=data.get('ip_address', ''),
-            user_agent=data.get('user_agent'),
-            message=entry.message,
-            level=entry.level,
-            service_name=entry.metadata.get('service')
-        )
-        
-        self._requests.append(request)
-        
-        # Update IP request tracking
-        if request.ip:
-            self._ip_requests[request.ip].append(request)
-            
     def process_entry(self, entry: LogEntry) -> None:
         """Process a single log entry and update metrics"""
         self._total_entries += 1
@@ -166,50 +98,46 @@ class MetricsCollector:
 
     def _process_access_log(self, entry: LogEntry) -> None:
         """Process web server access log entry"""
-        data = entry.parsed_data
-        
-        # Add request metric
-        self._add_request_metric(entry)
-        
-        # Process endpoint info
-        if 'endpoint' in data:
-            endpoint_info = data['endpoint']
-            path = endpoint_info['path']
-            self._endpoints[path] += 1
-            
-            # Track response times by endpoint type
-            if 'bytes_sent' in data:
-                self._endpoint_times[path].append(data['bytes_sent'])
-                self._response_times.append(data['bytes_sent'])
-        
-        # Process status codes
-        status_code = data.get('status_code', 0)
+        # HTTP metrics
+        status_code = entry.parsed_data.get('status_code', 0)
         if status_code > 0:
             status_group = f"{status_code//100}xx"
             self._status_codes[status_group] += 1
             
+            # Track success/error rates
             if status_code >= 400:
                 self._error_count += 1
                 self._errors.append(f"HTTP {status_code}: {entry.message}")
-        
-        # Process HTTP method
-        method = data.get('method')
+
+        # Traffic analysis
+        method = entry.parsed_data.get('method', '')
         if method:
             self._http_methods[method] += 1
-        
-        # Process client info
-        ip = data.get('ip_address')
+
+        path = entry.parsed_data.get('path', '')
+        if path:
+            self._endpoints[path] += 1
+
+        # Performance metrics
+        response_time = entry.parsed_data.get('response_time', 0)
+        if response_time > 0:
+            self._response_times.append(response_time)
+            if path:
+                self._endpoint_times[path].append(response_time)
+
+        # Client analysis
+        ip = entry.parsed_data.get('ip_address', '')
         if ip:
             self._unique_ips.add(ip)
+            self._ip_requests[ip].append(entry.timestamp)
+            
+            # Track potential attacks
             if status_code in (401, 403, 404):
                 self._failed_attempts[ip] += 1
-        
-        # Process user agent
-        if 'user_agent_info' in data:
-            ua_info = data['user_agent_info']
-            browser = ua_info.get('browser', 'unknown')
-            device_type = ua_info.get('device_type', 'unknown')
-            self._user_agents[f"{browser} ({device_type})"] += 1
+                
+        user_agent = entry.parsed_data.get('user_agent', '')
+        if user_agent:
+            self._user_agents[user_agent] += 1
 
     def _get_top_error_patterns(self, limit: int = 5) -> List[Dict[str, Any]]:
         """Get the most common error patterns"""
@@ -296,16 +224,8 @@ class MetricsCollector:
 
     def record_error(self, error: str) -> None:
         """Record a processing error"""
+        self._error_count += 1
         self._errors.append(error)
-        self._error_timestamps.append(datetime.now())
-
-    def get_errors(self) -> List[str]:
-        """Get list of recorded errors
-        
-        Returns:
-            List of error messages
-        """
-        return self._errors
 
     def set_duration(self, duration: timedelta) -> None:
         """Set the processing duration"""
