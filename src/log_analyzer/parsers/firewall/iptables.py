@@ -1,4 +1,5 @@
 import re
+import logging
 from datetime import datetime
 from typing import Dict, Optional, Any
 
@@ -35,6 +36,7 @@ class IPTablesLogParser(FirewallLogParser):
         super().__init__()
         self.name = "iptables"
         self.description = "IPTables Firewall Log Parser"
+        self.logger = logging.getLogger(__name__)
         
         # Compile regex patterns
         self.timestamp_regex = re.compile(self.TIMESTAMP_PATTERN)
@@ -68,6 +70,8 @@ class IPTablesLogParser(FirewallLogParser):
             ParserError: If line cannot be parsed
         """
         try:
+            self.logger.debug(f"Parsing iptables line: {line[:100]}...")
+            
             line = line.strip()
             if not line:
                 return None
@@ -90,6 +94,7 @@ class IPTablesLogParser(FirewallLogParser):
                 try:
                     timestamp = self.parse_timestamp(timestamp_str)
                 except ValueError:
+                    self.logger.warning(f"Could not parse timestamp: {timestamp_str}")
                     timestamp = datetime.now()
             
             # Find where the actual iptables data starts
@@ -113,66 +118,72 @@ class IPTablesLogParser(FirewallLogParser):
                     # Store this prefix for future matches
                     self.custom_prefix = f"{hostname} {process}:"
             
-            # Extract main log data
+            # First try extracting common fields using the base class method
             log_data_part = line[data_start:]
-            iptables_match = self.iptables_regex.search(log_data_part)
+            data = self.extract_common_firewall_fields(log_data_part)
             
-            if not iptables_match:
-                # Try a simpler approach - just extract key=value pairs
+            # If that didn't work, try the iptables regex
+            if not data or not ('src' in data or 'dst' in data):
+                iptables_match = self.iptables_regex.search(log_data_part)
+                if iptables_match:
+                    # Extract data from regex match
+                    data = {
+                        "interface_in": iptables_match.group(1) or "",
+                        "interface_out": iptables_match.group(2) or "",
+                        "mac": iptables_match.group(3) or "",
+                        "src": iptables_match.group(4) or "",
+                        "dst": iptables_match.group(5) or "",
+                        "length": iptables_match.group(6),
+                        "tos": iptables_match.group(7),
+                        "precedence": iptables_match.group(8),
+                        "ttl": iptables_match.group(9),
+                        "id": iptables_match.group(10),
+                        "flags": iptables_match.group(11).strip() if iptables_match.group(11) else "",
+                        "protocol": iptables_match.group(12) or "",
+                        "src_port": iptables_match.group(13),
+                        "dst_port": iptables_match.group(14),
+                        "window": iptables_match.group(15),
+                        "res": iptables_match.group(16),
+                        "urgent_pointer": iptables_match.group(17)
+                    }
+                    
+                    # Clean up empty values
+                    data = {k: v for k, v in data.items() if v}
+            
+            # If we still don't have data, try key-value extraction
+            if not data or not ('src' in data or 'dst' in data):
                 data = self._extract_key_value_pairs(log_data_part)
-                if not data:
+                if not data or not ('src' in data or 'dst' in data):
+                    self.logger.warning(f"Could not extract IP data from line: {line[:100]}")
                     return None  # Can't parse this line
-            else:
-                # Extract data from regex match
-                data = {
-                    "interface_in": iptables_match.group(1) or "",
-                    "interface_out": iptables_match.group(2) or "",
-                    "mac": iptables_match.group(3) or "",
-                    "src": iptables_match.group(4) or "",
-                    "dst": iptables_match.group(5) or "",
-                    "length": iptables_match.group(6),
-                    "tos": iptables_match.group(7),
-                    "precedence": iptables_match.group(8),
-                    "ttl": iptables_match.group(9),
-                    "id": iptables_match.group(10),
-                    "flags": iptables_match.group(11).strip() if iptables_match.group(11) else "",
-                    "protocol": iptables_match.group(12) or "",
-                    "src_port": iptables_match.group(13),
-                    "dst_port": iptables_match.group(14),
-                    "window": iptables_match.group(15),
-                    "res": iptables_match.group(16),
-                    "urgent_pointer": iptables_match.group(17)
-                }
-                
-                # Clean up empty values
-                data = {k: v for k, v in data.items() if v}
                 
             # Determine action based on the chain/target if present
-            action = "unknown"
-            
-            # Look for chain/target in the log
-            chain_match = re.search(r'(?:PREFIX=|CHAIN=|chain=|rule=|target=)(\w+)', log_data_part, re.IGNORECASE)
-            if chain_match:
-                chain = chain_match.group(1).upper()
-                if chain in ["DROP", "REJECT", "DENIED", "DENY", "BLOCK"]:
-                    action = "block"
-                elif chain in ["ACCEPT", "ALLOWED", "ALLOW", "PERMIT", "PASS"]:
-                    action = "allow"
-                else:
-                    action = chain.lower()
-            else:
-                # Try to infer action from other parts of the log
-                if "DROP" in log_data_part or "REJECT" in log_data_part:
-                    action = "block"
-                elif "ACCEPT" in log_data_part or "ALLOWED" in log_data_part:
-                    action = "allow"
-                elif "LOGDROP" in log_data_part:
-                    action = "block"
-                else:
-                    # Default to "log" if we can't determine
-                    action = "log"
+            if "action" not in data:
+                action = "unknown"
                 
-            data["action"] = action
+                # Look for chain/target in the log
+                chain_match = re.search(r'(?:PREFIX=|CHAIN=|chain=|rule=|target=)(\w+)', log_data_part, re.IGNORECASE)
+                if chain_match:
+                    chain = chain_match.group(1).upper()
+                    if chain in ["DROP", "REJECT", "DENIED", "DENY", "BLOCK"]:
+                        action = "block"
+                    elif chain in ["ACCEPT", "ALLOWED", "ALLOW", "PERMIT", "PASS"]:
+                        action = "allow"
+                    else:
+                        action = chain.lower()
+                else:
+                    # Try to infer action from other parts of the log
+                    if "DROP" in log_data_part or "REJECT" in log_data_part:
+                        action = "block"
+                    elif "ACCEPT" in log_data_part or "ALLOWED" in log_data_part:
+                        action = "allow"
+                    elif "LOGDROP" in log_data_part:
+                        action = "block"
+                    else:
+                        # Default to "log" if we can't determine
+                        action = "log"
+                    
+                data["action"] = action
             
             # Add hostname and process if found
             if hostname:
@@ -200,7 +211,7 @@ class IPTablesLogParser(FirewallLogParser):
             src_port = f":{data.get('src_port', '')}" if "src_port" in data else ""
             dst_port = f":{data.get('dst_port', '')}" if "dst_port" in data else ""
             
-            message = f"{action.upper()} {protocol_str} {src_ip}{src_port} -> {dst_ip}{dst_port}"
+            message = f"{data['action'].upper()} {protocol_str} {src_ip}{src_port} -> {dst_ip}{dst_port}"
             
             # Add interface information if available
             in_iface = data.get("interface_in")
@@ -213,8 +224,13 @@ class IPTablesLogParser(FirewallLogParser):
                 if out_iface:
                     iface_str += f"out:{out_iface}"
                 message += f" ({iface_str.strip()})"
+            
+            # Add rule info if available
+            if "rule_id" in data:
+                message += f" [Rule:{data['rule_id']}]"
                 
             # Create log entry
+            self.logger.debug(f"Created iptables log entry: {message}")
             return self.create_log_entry(
                 timestamp=timestamp,
                 message=message,
@@ -223,6 +239,7 @@ class IPTablesLogParser(FirewallLogParser):
             )
             
         except Exception as e:
+            self.logger.error(f"Error parsing iptables log: {str(e)}", exc_info=True)
             raise ParserError(f"Error parsing iptables log: {str(e)}")
             
     def _extract_key_value_pairs(self, text: str) -> Dict[str, str]:

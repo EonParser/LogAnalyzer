@@ -181,8 +181,16 @@ class LogAnalyzer(BaseAnalyzer):
 
         # Apply pipeline
         if pipeline:
-            entry = pipeline.process(entry)
-            if not entry:
+            # Check if pipeline is a Pipeline object with process method
+            if hasattr(pipeline, 'process'):
+                entry = pipeline.process(entry)
+            # Check if pipeline is a function (from TransformerFactory)
+            elif callable(pipeline):
+                entry = pipeline(entry)
+            else:
+                self.logger.warning(f"Unsupported pipeline type: {type(pipeline)}")
+                
+            if not entry:  # Entry was filtered out
                 return None
 
         self.metrics.process_entry(entry)

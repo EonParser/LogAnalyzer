@@ -1,4 +1,5 @@
 import re
+import logging
 from datetime import datetime
 from typing import Dict, Optional, List, Any, Tuple
 
@@ -12,6 +13,7 @@ class FirewallLogParser(BaseParser):
         """Initialize firewall log parser"""
         self.name = "generic_firewall"
         self.description = "Generic Firewall Log Parser"
+        self.logger = logging.getLogger(__name__)
 
     def supports_format(self, line: str) -> bool:
         """Check if the line is a supported firewall log format"""
@@ -64,6 +66,7 @@ class FirewallLogParser(BaseParser):
                 
             except ValueError:
                 # If it's not a valid IP, just store the original string
+                self.logger.debug(f"Invalid IP address format for {field}: {ip_str}")
                 ip_info[f"{field}_ip"] = ip_str
                 ip_info[f"{field}_ip_type"] = "unknown"
 
@@ -154,6 +157,7 @@ class FirewallLogParser(BaseParser):
             
             if port is not None:
                 try:
+                    # Ensure port is treated as integer
                     port = int(port)
                     port_info[port_field] = port
                     
@@ -175,7 +179,8 @@ class FirewallLogParser(BaseParser):
                             port_info[f"{prefix}_port_category"] = "dynamic"
                             
                 except (ValueError, TypeError):
-                    # If it's not a valid integer port, just store the original value
+                    # If it's not a valid integer port, log and store as is
+                    self.logger.debug(f"Invalid port format: {port}")
                     port_info[port_field] = port
         
         return port_info
@@ -310,15 +315,20 @@ class FirewallLogParser(BaseParser):
         # Remove None values
         metadata = {k: v for k, v in metadata.items() if v is not None}
         
-        return LogEntry(
-            timestamp=timestamp,
-            level=level,
-            message=message,
-            source=self.name,
-            raw_data=raw_data,
-            parsed_data=parsed_data,
-            metadata=metadata
-        )
+        try:
+            self.logger.debug(f"Creating log entry: {message}")
+            return LogEntry(
+                timestamp=timestamp,
+                level=level,
+                message=message,
+                source=self.name,
+                raw_data=raw_data,
+                parsed_data=parsed_data,
+                metadata=metadata
+            )
+        except Exception as e:
+            self.logger.error(f"Error creating log entry: {str(e)}")
+            raise ParserError(f"Error creating log entry: {str(e)}")
 
     def parse_timestamp(self, timestamp_str: str, year: Optional[int] = None) -> datetime:
         """Parse timestamp with various formats commonly found in firewall logs
@@ -366,4 +376,44 @@ class FirewallLogParser(BaseParser):
             import dateutil.parser
             return dateutil.parser.parse(timestamp_str)
         except:
+            self.logger.warning(f"Unable to parse timestamp: {timestamp_str}")
             raise ValueError(f"Unable to parse timestamp: {timestamp_str}")
+            
+    def extract_common_firewall_fields(self, line: str) -> Dict[str, Any]:
+        """Extract common firewall fields from a log line using regex
+        
+        Args:
+            line: Raw log line
+            
+        Returns:
+            Dictionary with extracted fields
+        """
+        # Common patterns in firewall logs
+        patterns = {
+            "src": r"(?:SRC=|src=|source=|from=)([^ ]+)",
+            "dst": r"(?:DST=|dst=|destination=|to=)([^ ]+)",
+            "src_port": r"(?:SPT=|sport=|src[_\-]port=)(\d+)",
+            "dst_port": r"(?:DPT=|dport=|dst[_\-]port=)(\d+)",
+            "protocol": r"(?:PROTO=|proto=|protocol=)([^ ]+)",
+            "interface_in": r"(?:IN=|in=|intf_in=|input=|iface_in=)([^ ]+)",
+            "interface_out": r"(?:OUT=|out=|intf_out=|output=|iface_out=)([^ ]+)",
+            "action": r"(?:action=|RULE=|ACTION=|DISPOSITION=)([^ ]+)",
+            "rule_id": r"(?:rule_id=|RULE[_\-]ID=|rule=|id=)([^ ]+)"
+        }
+        
+        result = {}
+        
+        # Extract fields using regex
+        for field, pattern in patterns.items():
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match:
+                result[field] = match.group(1)
+                
+        # Try to determine the action from common keywords if not explicitly found
+        if "action" not in result:
+            if any(keyword in line.upper() for keyword in ["BLOCK", "DROP", "DENY", "REJECT"]):
+                result["action"] = "block"
+            elif any(keyword in line.upper() for keyword in ["ACCEPT", "ALLOW", "PASS", "PERMIT"]):
+                result["action"] = "allow"
+        
+        return result
