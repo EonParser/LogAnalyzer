@@ -314,24 +314,66 @@ def analyze_firewall(
 
 
 def extract_firewall_metrics(results: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract firewall-specific metrics from analysis results
+    """Extract enhanced firewall-specific metrics from analysis results
     
     Args:
         results: Analysis results from LogAnalyzer
         
     Returns:
-        Dictionary of firewall-specific metrics
+        Dictionary of firewall-specific metrics with enhanced details
     """
     metrics = {
+        # Basic counters
         "allowed": 0,
         "blocked": 0,
         "disconnected": 0,
         "nat": 0,
+        
+        # IP tracking
         "unique_ips": set(),
-        "blocked_ports": Counter(),
         "blocked_ips": Counter(),
         "traffic_sources": Counter(),
+        "traffic_destinations": Counter(),
+        
+        # Port tracking
+        "blocked_ports": Counter(),
+        "target_ports": Counter(),
+        "source_ports": Counter(),
+        
+        # Protocol tracking
+        "protocols": Counter(),
+        "blocked_protocols": Counter(),
+        
+        # Interface tracking
+        "interfaces": Counter(),
+        "interface_blocks": Counter(),
+        
+        # Time-based metrics
+        "hourly_traffic": defaultdict(int),
+        "hourly_blocks": defaultdict(int),
+        
+        # Rule tracking
+        "rules_triggered": Counter(),
+        "block_reasons": Counter(),
+        
+        # Attack pattern detection
+        "port_scan_attempts": 0,
+        "brute_force_attempts": 0,
+        "dos_attempts": 0,
+        "suspicious_ips": set()
     }
+    
+    # Scan detection parameters
+    port_scan_threshold = 5  # Consider it a port scan if an IP hits X different ports
+    brute_force_threshold = 3  # Consider it a brute force if X failed attempts to same service
+    high_rate_threshold = 20  # Consider it suspicious if more than X requests per minute
+    
+    # Keep track of unique port hits per IP for port scan detection
+    ip_port_hits = defaultdict(set)
+    # Keep track of failed auth attempts per IP for brute force detection
+    ip_auth_failures = Counter()
+    # Keep track of request timestamps per IP for rate detection
+    ip_request_times = defaultdict(list)
     
     # Extract metrics from log entries
     entries = results.get("entries", [])
@@ -343,8 +385,8 @@ def extract_firewall_metrics(results: Dict[str, Any]) -> Dict[str, Any]:
         # Check if this is a firewall log
         if entry.metadata.get("log_type") != "firewall":
             continue
-            
-        # Count actions
+        
+        # Count actions by type
         action = entry.metadata.get("action", "unknown")
         if action == "allow":
             metrics["allowed"] += 1
@@ -355,32 +397,233 @@ def extract_firewall_metrics(results: Dict[str, Any]) -> Dict[str, Any]:
         elif action == "nat":
             metrics["nat"] += 1
         
-        # Extract IP addresses
+        # Add to hourly traffic
+        if hasattr(entry, "timestamp"):
+            hour = entry.timestamp.strftime("%Y-%m-%d %H:00")
+            metrics["hourly_traffic"][hour] += 1
+            
+            if action == "block":
+                metrics["hourly_blocks"][hour] += 1
+        
+        # Extract data from parsed content
         if hasattr(entry, "parsed_data"):
-            src_ip = entry.parsed_data.get("src")
-            dst_ip = entry.parsed_data.get("dst")
+            parsed_data = entry.parsed_data
+            
+            # Process IP addresses
+            src_ip = parsed_data.get("src")
+            dst_ip = parsed_data.get("dst")
             
             if src_ip:
                 metrics["unique_ips"].add(src_ip)
                 metrics["traffic_sources"][src_ip] += 1
+                
+                # Add timestamp for rate detection
+                if hasattr(entry, "timestamp"):
+                    ip_request_times[src_ip].append(entry.timestamp)
+            
             if dst_ip:
                 metrics["unique_ips"].add(dst_ip)
+                metrics["traffic_destinations"][dst_ip] += 1
             
-            # Track blocked connections
+            # Process ports
+            src_port = parsed_data.get("src_port")
+            dst_port = parsed_data.get("dst_port")
+            
+            if src_port and isinstance(src_port, (str, int)):
+                # Ensure port is handled as string for consistency
+                src_port = str(src_port)
+                metrics["source_ports"][src_port] += 1
+            
+            if dst_port and isinstance(dst_port, (str, int)):
+                # Ensure port is handled as string for consistency
+                dst_port = str(dst_port)
+                metrics["target_ports"][dst_port] += 1
+                
+                # Track unique port hits per source IP for port scan detection
+                if src_ip and dst_port:
+                    ip_port_hits[src_ip].add(dst_port)
+            
+            # Track blocked data
             if action == "block":
                 if src_ip:
                     metrics["blocked_ips"][src_ip] += 1
-                    
-                # Track blocked ports
-                dst_port = entry.parsed_data.get("dst_port")
-                if dst_port and dst_port.isdigit():
+                
+                if dst_port:
                     metrics["blocked_ports"][dst_port] += 1
+                    
+                # Track reason for block if available
+                reason = parsed_data.get("reason", entry.metadata.get("reason"))
+                if reason:
+                    metrics["block_reasons"][reason] += 1
+                
+                # For auth failures, increment brute force counter
+                if "auth" in str(entry.message).lower() or "login" in str(entry.message).lower():
+                    if src_ip:
+                        ip_auth_failures[src_ip] += 1
+            
+            # Track protocol information
+            protocol = parsed_data.get("protocol")
+            if protocol:
+                metrics["protocols"][protocol] += 1
+                
+                if action == "block":
+                    metrics["blocked_protocols"][protocol] += 1
+            
+            # Track interface information
+            interface_in = parsed_data.get("interface_in")
+            interface_out = parsed_data.get("interface_out")
+            
+            if interface_in:
+                metrics["interfaces"][f"in:{interface_in}"] += 1
+                
+                if action == "block":
+                    metrics["interface_blocks"][f"in:{interface_in}"] += 1
+                    
+            if interface_out:
+                metrics["interfaces"][f"out:{interface_out}"] += 1
+                
+                if action == "block":
+                    metrics["interface_blocks"][f"out:{interface_out}"] += 1
+            
+            # Track rule information if available
+            rule_id = parsed_data.get("rule_id", parsed_data.get("connection_id"))
+            if rule_id:
+                metrics["rules_triggered"][rule_id] += 1
+    
+    # Process the collected data to detect attack patterns
+    for ip, ports in ip_port_hits.items():
+        if len(ports) >= port_scan_threshold:
+            metrics["port_scan_attempts"] += 1
+            metrics["suspicious_ips"].add(ip)
+    
+    for ip, failures in ip_auth_failures.items():
+        if failures >= brute_force_threshold:
+            metrics["brute_force_attempts"] += 1
+            metrics["suspicious_ips"].add(ip)
+    
+    # Detect high request rates (potential DoS)
+    for ip, timestamps in ip_request_times.items():
+        if len(timestamps) < high_rate_threshold:
+            continue
+            
+        # Sort timestamps
+        sorted_times = sorted(timestamps)
+        
+        # Check if there are periods with high request rates
+        for i in range(len(sorted_times) - high_rate_threshold):
+            start = sorted_times[i]
+            end = sorted_times[i + high_rate_threshold - 1]
+            
+            # If high_rate_threshold requests happened within 60 seconds
+            if (end - start).total_seconds() <= 60:
+                metrics["dos_attempts"] += 1
+                metrics["suspicious_ips"].add(ip)
+                break
+    
+    # Add percentage metrics
+    total_traffic = metrics["allowed"] + metrics["blocked"]
+    metrics["blocked_percentage"] = 0.0
+    if total_traffic > 0:
+        metrics["blocked_percentage"] = metrics["blocked"] / total_traffic * 100
+
+    # Get top 10 for various categories
+    metrics["top_blocked_ips"] = [{
+        "ip": ip,
+        "count": count,
+        "type": classify_ip(ip)
+    } for ip, count in metrics["blocked_ips"].most_common(10)]
+    
+    metrics["top_traffic_sources"] = [{
+        "ip": ip,
+        "count": count,
+        "type": classify_ip(ip)
+    } for ip, count in metrics["traffic_sources"].most_common(10)]
+    
+    metrics["top_blocked_ports"] = [{
+        "port": port,
+        "service": get_service_name(port),
+        "count": count,
+        "percentage": (count / metrics["blocked"] * 100) if metrics["blocked"] > 0 else 0
+    } for port, count in metrics["blocked_ports"].most_common(10)]
+    
+    metrics["top_attacked_services"] = [{
+        "service": get_service_name(port),
+        "port": port,
+        "count": count,
+        "percentage": (count / metrics["blocked"] * 100) if metrics["blocked"] > 0 else 0
+    } for port, count in metrics["blocked_ports"].most_common(10)]
+    
+    metrics["top_protocols"] = [{
+        "protocol": protocol,
+        "count": count
+    } for protocol, count in metrics["protocols"].most_common(5)]
+    
+    metrics["top_block_reasons"] = [{
+        "reason": reason if reason else "Unknown",
+        "count": count
+    } for reason, count in metrics["block_reasons"].most_common(5)]
+    
+    # Add hourly distribution statistics
+    metrics["hourly_distribution"] = {
+        "traffic": dict(metrics["hourly_traffic"]),
+        "blocks": dict(metrics["hourly_blocks"])
+    }
+    
+    # Calculate peak times
+    if metrics["hourly_traffic"]:
+        traffic_peak = max(metrics["hourly_traffic"].items(), key=lambda x: x[1])
+        metrics["peak_traffic_hour"] = {
+            "hour": traffic_peak[0],
+            "count": traffic_peak[1]
+        }
+    
+    if metrics["hourly_blocks"]:
+        blocks_peak = max(metrics["hourly_blocks"].items(), key=lambda x: x[1])
+        metrics["peak_blocks_hour"] = {
+            "hour": blocks_peak[0],
+            "count": blocks_peak[1]
+        }
+    
+    # Add attack summary
+    metrics["attack_summary"] = {
+        "port_scan_attempts": metrics["port_scan_attempts"],
+        "brute_force_attempts": metrics["brute_force_attempts"],
+        "dos_attempts": metrics["dos_attempts"],
+        "suspicious_ips_count": len(metrics["suspicious_ips"]),
+        "suspicious_ips": list(metrics["suspicious_ips"])
+    }
     
     return metrics
 
+def classify_ip(ip: str) -> str:
+    """Classify an IP address as internal, external, or special
+    
+    Args:
+        ip: IP address to classify
+        
+    Returns:
+        Classification of the IP
+    """
+    import ipaddress
+    
+    try:
+        ip_obj = ipaddress.ip_address(ip)
+        
+        if ip_obj.is_private:
+            return "Internal"
+        elif ip_obj.is_loopback:
+            return "Loopback"
+        elif ip_obj.is_multicast:
+            return "Multicast"
+        elif ip_obj.is_reserved:
+            return "Reserved"
+        else:
+            return "External"
+    except ValueError:
+        return "Invalid"
 
 def get_service_name(port: str) -> str:
-    """Get service name for a port number
+    """Get service name for a port number with expanded list
     
     Args:
         port: Port number as string
@@ -388,41 +631,216 @@ def get_service_name(port: str) -> str:
     Returns:
         Service name or "Unknown"
     """
-    # Common port mappings
+    # More comprehensive port mappings
     port_map = {
-        "22": "SSH",
-        "23": "Telnet",
-        "25": "SMTP",
-        "53": "DNS",
-        "80": "HTTP",
-        "443": "HTTPS",
-        "3389": "RDP",
-        "1433": "SQL Server",
-        "3306": "MySQL",
-        "5432": "PostgreSQL",
-        "137": "NetBIOS",
-        "138": "NetBIOS",
-        "139": "NetBIOS",
-        "445": "SMB",
+        "1": "TCPMUX",
+        "5": "RJE",
+        "7": "ECHO",
+        "9": "DISCARD",
+        "11": "SYSTAT",
+        "13": "DAYTIME",
+        "17": "QOTD",
+        "18": "MSP",
+        "19": "CHARGEN",
+        "20": "FTP-DATA",
         "21": "FTP",
-        "20": "FTP Data",
-        "161": "SNMP",
-        "162": "SNMP Trap",
-        "389": "LDAP",
-        "636": "LDAPS",
+        "22": "SSH",
+        "23": "TELNET",
+        "25": "SMTP",
+        "37": "TIME",
+        "42": "NAMESERVER",
+        "43": "NICNAME",
+        "49": "TACACS",
+        "53": "DNS",
+        "67": "DHCP/BOOTP",
+        "68": "DHCP/BOOTP",
+        "69": "TFTP",
+        "70": "GOPHER",
+        "79": "FINGER",
+        "80": "HTTP",
+        "88": "KERBEROS",
+        "102": "MS EXCHANGE",
         "110": "POP3",
+        "111": "SUNRPC",
+        "113": "IDENT",
+        "119": "NNTP",
+        "123": "NTP",
+        "135": "MS-RPC",
+        "137": "NETBIOS-NS",
+        "138": "NETBIOS-DGM",
+        "139": "NETBIOS-SSN",
         "143": "IMAP",
+        "161": "SNMP",
+        "162": "SNMP-TRAP",
+        "177": "XDMCP",
+        "179": "BGP",
+        "201": "APPLETALK",
+        "264": "BGMP",
+        "318": "TSP",
+        "381": "HP OPENVIEW",
+        "383": "HP OPENVIEW",
+        "389": "LDAP",
+        "411": "DIRECT CONNECT",
+        "412": "DIRECT CONNECT",
+        "443": "HTTPS",
+        "445": "MS-DS",
+        "464": "KERBEROS",
+        "465": "SMTPS",
+        "497": "RETROSPECT",
+        "500": "ISAKMP",
+        "512": "REXEC",
+        "513": "RLOGIN",
+        "514": "SYSLOG",
+        "515": "LPD/LPR",
+        "520": "RIP",
+        "521": "RIPNG",
+        "540": "UUCP",
+        "554": "RTSP",
+        "546": "DHCP-CLIENT",
+        "547": "DHCP-SERVER",
+        "560": "RMONITOR",
+        "563": "NNTPS",
+        "587": "SUBMISSION",
+        "591": "FILEMAKER",
+        "593": "MS-RPC",
+        "631": "IPP",
+        "636": "LDAPS",
+        "639": "MSDP",
+        "646": "LDP",
+        "691": "MS EXCHANGE",
+        "860": "ISCSI",
+        "873": "RSYNC",
+        "902": "VMWARE",
+        "989": "FTPS-DATA",
+        "990": "FTPS",
         "993": "IMAPS",
         "995": "POP3S",
+        "1025": "MS RPC",
+        "1026": "MS RPC",
+        "1027": "MS RPC",
+        "1028": "MS RPC",
+        "1029": "MS RPC",
+        "1080": "SOCKS",
+        "1080": "MYSPACE",
+        "1194": "OPENVPN",
+        "1214": "KAZAA",
+        "1241": "NESSUS",
+        "1311": "DELL OPENMANAGE",
+        "1337": "WASTE",
+        "1433": "MS-SQL",
+        "1434": "MS-SQL",
+        "1512": "WINS",
+        "1589": "CISCO VQP",
+        "1701": "L2TP",
         "1723": "PPTP",
-        "500": "IKE",
-        "4500": "IKE NAT-T",
-        "8080": "HTTP Proxy",
-        "8443": "HTTPS Alt",
+        "1725": "STEAM",
+        "1741": "CITRIX",
+        "1755": "MS-STREAMING",
+        "1812": "RADIUS",
+        "1813": "RADIUS",
+        "1863": "MSN",
+        "1985": "CISCO HSRP",
+        "2000": "CISCO SCCP",
+        "2002": "CISCO ACS",
+        "2049": "NFS",
+        "2082": "CPANEL",
+        "2083": "CPANEL",
+        "2100": "ORACLE XDB",
+        "2222": "DIRECTADMIN",
+        "2302": "HALO",
+        "2483": "ORACLE",
+        "2484": "ORACLE",
+        "2745": "BAGLE.H",
+        "2967": "SYMANTEC AV",
+        "3050": "INTERBASE",
+        "3074": "XBOX LIVE",
+        "3124": "HTTP PROXY",
+        "3127": "MYDOOM",
+        "3128": "HTTP PROXY",
+        "3222": "GLBP",
+        "3260": "ISCSI TARGET",
+        "3306": "MYSQL",
+        "3389": "RDP",
+        "3689": "ITUNES",
+        "3690": "SVN",
+        "3724": "WORLD OF WARCRAFT",
+        "3784": "VENTRILO",
+        "3785": "VENTRILO",
+        "4333": "MSQL",
+        "4444": "BLASTER",
+        "4500": "IPSEC NAT-T",
+        "4664": "GOOGLE DESKTOP",
+        "4672": "EDONKEY",
+        "4899": "RADMIN",
+        "5000": "UPnP",
+        "5001": "SLINGBOX",
+        "5004": "RTP",
+        "5005": "RTP",
+        "5050": "YAHOO MESSENGER",
+        "5060": "SIP",
+        "5190": "AIM/ICQ",
+        "5222": "XMPP/JABBER",
+        "5223": "XMPP/JABBER",
+        "5432": "POSTGRESQL",
+        "5500": "VNC",
+        "5554": "SASSER",
+        "5631": "PCANYWHERE",
+        "5632": "PCANYWHERE",
+        "5800": "VNC",
+        "5900": "VNC",
+        "6000": "X11",
+        "6001": "X11",
+        "6112": "BLIZZARD",
+        "6129": "DAMEWARE",
+        "6257": "WINMX",
+        "6346": "GNUTELLA",
+        "6347": "GNUTELLA",
+        "6379": "REDIS",
+        "6881": "BITTORRENT",
+        "6969": "BITTORRENT",
+        "7212": "GHOSTSURF",
+        "7648": "CU-SEEME",
+        "7649": "CU-SEEME",
+        "8000": "HTTP ALT",
+        "8080": "HTTP PROXY",
+        "8086": "KASPERSKY",
+        "8087": "KASPERSKY",
+        "8118": "PRIVOXY",
+        "8200": "VMWARE SERVER",
+        "8500": "ADOBE COLDFUSION",
+        "8767": "TEAMSPEAK",
+        "8866": "BAGLE",
+        "9100": "PRINTER",
+        "9101": "BACULA",
+        "9102": "BACULA",
+        "9103": "BACULA",
+        "9119": "MXIT",
+        "9800": "WEBDAV",
+        "9898": "MONKEYCOM",
+        "9988": "RBOT/SPYBOT",
+        "9999": "URCHIN",
+        "10000": "WEBMIN",
+        "11371": "OPENPGP",
+        "12035": "SECOND LIFE",
+        "12036": "SECOND LIFE",
+        "12345": "NETBUS",
+        "13720": "NETBACKUP",
+        "13721": "NETBACKUP",
+        "14567": "BATTLEFIELD",
+        "15118": "DIPNET",
+        "19226": "PCANYWHERE",
+        "19638": "ENSIM",
+        "20000": "USERMIN",
+        "24800": "SYNERGY",
+        "25999": "XFIRE",
+        "27015": "STEAM",
+        "27374": "SUB7",
+        "28960": "CALL OF DUTY",
+        "31337": "BACK ORIFICE",
+        "33434": "TRACEROUTE"
     }
     
     return port_map.get(port, "Unknown")
-
 
 def print_firewall_summary(results: Dict[str, Any], console: Console = console):
     """Print a formatted summary of firewall analysis results

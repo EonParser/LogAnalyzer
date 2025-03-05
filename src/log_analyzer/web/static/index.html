@@ -14,6 +14,7 @@
     <script src="/components/SecurityAnalysis.js"></script>
     <script src="/components/PerformanceAnalysis.js"></script>
     <script src="/components/TimeAnalysis.js"></script>
+    <script src="/components/FirewallDashboard.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
 </head>
 <body class="bg-gray-100">
@@ -134,13 +135,9 @@
                 // If firewall analysis, show different components
                 if (logType === 'firewall' && results.firewall_analysis) {
                     return React.createElement('div', { className: 'space-y-6' }, [
-                        React.createElement(FirewallMetricsOverview, { 
-                            data: results.firewall_analysis.summary,
-                            key: 'firewall-metrics'
-                        }),
-                        React.createElement(FirewallSecurityAnalysis, { 
+                        React.createElement(FirewallDashboard, { 
                             data: results.firewall_analysis,
-                            key: 'firewall-security'
+                            key: 'firewall-dashboard'
                         })
                     ]);
                 }
