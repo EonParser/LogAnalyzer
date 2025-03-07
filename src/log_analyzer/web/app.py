@@ -26,6 +26,7 @@ from ..parsers.syslog import SyslogParser
 from ..parsers.firewall.firewall_parser import register_with_parser_factory
 from ..processors.pipeline import FilterStep, Pipeline, ProcessingStep
 from ..processors.transformers import TransformerFactory
+from .enhanced_firewall_metrics import extract_firewall_metrics, classify_ip, get_service_name
 from .log_processor import LogProcessor
 
 logging.basicConfig(level=logging.DEBUG)
@@ -264,7 +265,7 @@ async def process_logs(
         })
 
 async def process_firewall_logs(saved_files: List[Dict], parser_name: str, pipeline: Pipeline) -> Dict[str, Any]:
-    """Process firewall log files and extract firewall-specific metrics
+    """Process firewall log files and extract enhanced firewall-specific metrics
     
     Args:
         saved_files: List of file info dictionaries
@@ -272,29 +273,62 @@ async def process_firewall_logs(saved_files: List[Dict], parser_name: str, pipel
         pipeline: Processing pipeline
         
     Returns:
-        Dictionary with firewall analysis results
+        Dictionary with enhanced firewall analysis results
     """
-    from collections import Counter
+    from collections import Counter, defaultdict
     import traceback
-
-    logging.info(f"Starting firewall log analysis with parser: {parser_name}")
     
-    # Initialize metrics
-    metrics = {
-        "allowed": 0,
-        "blocked": 0,
-        "disconnected": 0,
-        "nat": 0,
-        "unique_ips": set(),
-        "blocked_ports": Counter(),
-        "blocked_ips": Counter(),
-        "traffic_sources": Counter(),
-    }
+    # Import enhanced firewall metrics functions
+    from .enhanced_firewall_metrics import extract_firewall_metrics, classify_ip, get_service_name
+
+    logging.info(f"Starting enhanced firewall log analysis with parser: {parser_name}")
     
     all_entries = []
     total_entries = 0
     error_count = 0
     error_messages = []
+    
+    # Initialize combined metrics structure
+    combined_metrics = {
+        # Basic counters
+        "allowed": 0,
+        "blocked": 0,
+        "disconnected": 0,
+        "nat": 0,
+        
+        # IP tracking
+        "unique_ips": set(),
+        "blocked_ips": Counter(),
+        "traffic_sources": Counter(),
+        "traffic_destinations": Counter(),
+        
+        # Port tracking
+        "blocked_ports": Counter(),
+        "target_ports": Counter(),
+        "source_ports": Counter(),
+        
+        # Protocol tracking
+        "protocols": Counter(),
+        "blocked_protocols": Counter(),
+        
+        # Interface tracking
+        "interfaces": Counter(),
+        "interface_blocks": Counter(),
+        
+        # Time-based metrics
+        "hourly_traffic": defaultdict(int),
+        "hourly_blocks": defaultdict(int),
+        
+        # Rule tracking
+        "rules_triggered": Counter(),
+        "block_reasons": Counter(),
+        
+        # Attack pattern detection
+        "port_scan_attempts": 0,
+        "brute_force_attempts": 0,
+        "dos_attempts": 0,
+        "suspicious_ips": set()
+    }
     
     # Process each file
     for file_info in saved_files:
@@ -317,8 +351,7 @@ async def process_firewall_logs(saved_files: List[Dict], parser_name: str, pipel
             logging.info(f"Analyzing file {file_path} with parser {parser_name}")
             
             try:
-                # If the pipeline is from TransformerFactory, it's a function not a Pipeline object
-                # Create a simple adapter to make it work with analyze_file
+                # Ensure pipeline is properly configured
                 if callable(pipeline) and not hasattr(pipeline, 'process'):
                     transformer_func = pipeline
                     
@@ -341,72 +374,49 @@ async def process_firewall_logs(saved_files: List[Dict], parser_name: str, pipel
                     logging.error(f"No results returned from analyzer for {filename}")
                     continue
                 
+                # Use enhanced metrics extraction
+                file_metrics = extract_firewall_metrics(results)
+                
+                # Merge with combined metrics
+                # Numeric counters
+                combined_metrics["allowed"] += file_metrics["allowed"]
+                combined_metrics["blocked"] += file_metrics["blocked"]
+                combined_metrics["disconnected"] += file_metrics["disconnected"]
+                combined_metrics["nat"] += file_metrics["nat"] 
+                combined_metrics["port_scan_attempts"] += file_metrics["port_scan_attempts"]
+                combined_metrics["brute_force_attempts"] += file_metrics["brute_force_attempts"]
+                combined_metrics["dos_attempts"] += file_metrics["dos_attempts"]
+                
+                # Merge sets
+                combined_metrics["unique_ips"].update(file_metrics["unique_ips"])
+                combined_metrics["suspicious_ips"].update(file_metrics["suspicious_ips"])
+                
+                # Merge counters
+                for field in ["blocked_ips", "traffic_sources", "traffic_destinations", 
+                            "blocked_ports", "target_ports", "source_ports", 
+                            "protocols", "blocked_protocols", "interfaces", 
+                            "interface_blocks", "rules_triggered", "block_reasons"]:
+                    if field in file_metrics and file_metrics[field]:
+                        for key, count in file_metrics[field].items():
+                            combined_metrics[field][key] += count
+                
+                # Merge hourly distributions
+                for hour, count in file_metrics["hourly_traffic"].items():
+                    combined_metrics["hourly_traffic"][hour] += count
+                for hour, count in file_metrics["hourly_blocks"].items():
+                    combined_metrics["hourly_blocks"][hour] += count
+                
+                # Track total entries
                 entries = results.get("entries", [])
-                logging.info(f"Analysis found {len(entries)} entries in {filename}")
+                total_entries += len(entries)
+                all_entries.extend(entries)
                 
-                if not entries:
-                    logging.warning(f"No entries found in {filename}")
-                    continue
-                
-                # Process entries and extract metrics
-                firewall_entries_count = 0
-                
-                for entry in entries:
-                    total_entries += 1
-                    
-                    # Debug log the entry data
-                    logging.debug(f"Entry: {entry.message if hasattr(entry, 'message') else 'No message'}")
-                    logging.debug(f"Metadata: {entry.metadata if hasattr(entry, 'metadata') else 'No metadata'}")
-                    
-                    # Skip entries without metadata
-                    if not hasattr(entry, "metadata") or not entry.metadata:
-                        logging.debug("Entry has no metadata, skipping")
-                        continue
-                        
-                    # Check if this is a firewall log
-                    log_type = entry.metadata.get("log_type")
-                    if log_type != "firewall":
-                        logging.debug(f"Entry log_type is {log_type}, not firewall")
-                        continue
-                    
-                    firewall_entries_count += 1
-                    all_entries.append(entry)
-                    
-                    # Count actions
-                    action = entry.metadata.get("action", "unknown")
-                    if action == "allow":
-                        metrics["allowed"] += 1
-                    elif action == "block":
-                        metrics["blocked"] += 1
-                    elif action == "disconnect":
-                        metrics["disconnected"] += 1
-                    elif action == "nat":
-                        metrics["nat"] += 1
-                    
-                    # Extract IP addresses
-                    if hasattr(entry, "parsed_data"):
-                        src_ip = entry.parsed_data.get("src")
-                        dst_ip = entry.parsed_data.get("dst")
-                        
-                        if src_ip:
-                            metrics["unique_ips"].add(src_ip)
-                            metrics["traffic_sources"][src_ip] += 1
-                        if dst_ip:
-                            metrics["unique_ips"].add(dst_ip)
-                        
-                        # Track blocked connections
-                        if action == "block":
-                            if src_ip:
-                                metrics["blocked_ips"][src_ip] += 1
-                                
-                            # Track blocked ports
-                            dst_port = entry.parsed_data.get("dst_port")
-                            if dst_port:
-                                # Convert to string to ensure consistent handling
-                                port_str = str(dst_port)
-                                metrics["blocked_ports"][port_str] += 1
-                
-                logging.info(f"Processed {firewall_entries_count} firewall entries from {filename}")
+                # Log metrics for this file
+                logging.info(f"File metrics for {filename}:")
+                logging.info(f"  Allowed: {file_metrics['allowed']}")
+                logging.info(f"  Blocked: {file_metrics['blocked']}")
+                logging.info(f"  Unique IPs: {len(file_metrics['unique_ips'])}")
+                logging.info(f"  Suspicious IPs: {len(file_metrics['suspicious_ips'])}")
                 
                 # Add any errors from this file
                 if "errors" in results and results["errors"]:
@@ -432,74 +442,108 @@ async def process_firewall_logs(saved_files: List[Dict], parser_name: str, pipel
             error_count += 1
             error_messages.append(error_message)
     
-    # Log metrics summary
-    logging.info(f"Firewall analysis summary:")
+    # Log final metrics summary
+    logging.info(f"Enhanced firewall analysis summary:")
     logging.info(f"  Total entries: {total_entries}")
-    logging.info(f"  Firewall entries: {len(all_entries)}")
-    logging.info(f"  Allowed connections: {metrics['allowed']}")
-    logging.info(f"  Blocked connections: {metrics['blocked']}")
-    logging.info(f"  Unique IPs: {len(metrics['unique_ips'])}")
-    
-    # Log top 5 blocked ports and IPs
-    if metrics['blocked_ports']:
-        logging.info("  Top blocked ports:")
-        for port, count in metrics['blocked_ports'].most_common(5):
-            logging.info(f"    Port {port}: {count} times")
-    
-    if metrics['blocked_ips']:
-        logging.info("  Top blocked IPs:")
-        for ip, count in metrics['blocked_ips'].most_common(5):
-            logging.info(f"    IP {ip}: {count} times")
+    logging.info(f"  Allowed connections: {combined_metrics['allowed']}")
+    logging.info(f"  Blocked connections: {combined_metrics['blocked']}")
+    logging.info(f"  Unique IPs: {len(combined_metrics['unique_ips'])}")
+    logging.info(f"  Suspicious IPs: {len(combined_metrics['suspicious_ips'])}")
+    logging.info(f"  Port scan attempts: {combined_metrics['port_scan_attempts']}")
+    logging.info(f"  Brute force attempts: {combined_metrics['brute_force_attempts']}")
+    logging.info(f"  DoS attempts: {combined_metrics['dos_attempts']}")
     
     # Calculate blocked percentage
-    total_traffic = metrics["allowed"] + metrics["blocked"]
+    total_traffic = combined_metrics["allowed"] + combined_metrics["blocked"]
     blocked_percentage = 0
     if total_traffic > 0:
-        blocked_percentage = (metrics["blocked"] / total_traffic) * 100
+        blocked_percentage = (combined_metrics["blocked"] / total_traffic) * 100
     
-    # Get top blocked ports with service names
-    port_services = get_port_services()
+    # Create enhanced results structure
+    # Get top blocked ports with service names & percentages
     top_blocked_ports = [
-        {"port": port, "service": port_services.get(port, "Unknown"), "count": count}
-        for port, count in metrics["blocked_ports"].most_common(10)
+        {"port": port, 
+         "service": get_service_name(port), 
+         "count": count,
+         "percentage": (count / combined_metrics["blocked"] * 100) if combined_metrics["blocked"] > 0 else 0}
+        for port, count in combined_metrics["blocked_ports"].most_common(10)
     ]
     
-    # Get top blocked IPs
+    # Get top blocked IPs with type classification
     top_blocked_ips = [
-        {"ip": ip, "count": count}
-        for ip, count in metrics["blocked_ips"].most_common(10)
+        {"ip": ip, 
+         "count": count,
+         "type": classify_ip(ip)}
+        for ip, count in combined_metrics["blocked_ips"].most_common(10)
     ]
     
-    # Get top traffic sources
+    # Get top traffic sources with type classification
     top_traffic_sources = [
-        {"ip": ip, "count": count}
-        for ip, count in metrics["traffic_sources"].most_common(10)
+        {"ip": ip, 
+         "count": count,
+         "type": classify_ip(ip)}
+        for ip, count in combined_metrics["traffic_sources"].most_common(10)
+    ]
+    
+    # Get top attacked services (same as blocked ports but with service focus)
+    top_attacked_services = [
+        {"service": get_service_name(port), 
+         "port": port, 
+         "count": count,
+         "percentage": (count / combined_metrics["blocked"] * 100) if combined_metrics["blocked"] > 0 else 0}
+        for port, count in combined_metrics["blocked_ports"].most_common(10)
+    ]
+    
+    # Get top protocols
+    top_protocols = [
+        {"protocol": protocol, "count": count}
+        for protocol, count in combined_metrics["protocols"].most_common(5)
+    ]
+    
+    # Get top block reasons
+    top_block_reasons = [
+        {"reason": reason if reason else "Unknown", "count": count}
+        for reason, count in combined_metrics["block_reasons"].most_common(5)
     ]
     
     # Create summary
     summary = {
         "total_entries": total_entries,
-        "allowed_connections": metrics["allowed"],
-        "blocked_connections": metrics["blocked"],
-        "disconnected_connections": metrics["disconnected"],
-        "nat_operations": metrics["nat"],
-        "unique_ips": len(metrics["unique_ips"]),
+        "allowed_connections": combined_metrics["allowed"],
+        "blocked_connections": combined_metrics["blocked"],
+        "disconnected_connections": combined_metrics["disconnected"],
+        "nat_operations": combined_metrics["nat"],
+        "unique_ips": len(combined_metrics["unique_ips"]),
         "blocked_percentage": round(blocked_percentage, 2),
         "firewall_type": parser_name
     }
     
-    # Create final result structure
+    # Create final enhanced result structure
     result = {
         "firewall_analysis": {
             "summary": summary,
             "top_blocked_ports": top_blocked_ports,
             "top_blocked_ips": top_blocked_ips,
             "top_traffic_sources": top_traffic_sources,
+            "top_attacked_services": top_attacked_services,
+            "top_protocols": top_protocols,
+            "top_block_reasons": top_block_reasons,
+            "hourly_distribution": {
+                "traffic": dict(combined_metrics["hourly_traffic"]),
+                "blocks": dict(combined_metrics["hourly_blocks"])
+            },
+            "attack_summary": {
+                "port_scan_attempts": combined_metrics["port_scan_attempts"],
+                "brute_force_attempts": combined_metrics["brute_force_attempts"],
+                "dos_attempts": combined_metrics["dos_attempts"],
+                "suspicious_ips_count": len(combined_metrics["suspicious_ips"]),
+                "suspicious_ips": list(combined_metrics["suspicious_ips"])
+            }
         },
         "summary": {
             "total_entries": total_entries,
             "error_rate": f"{(error_count / max(1, total_entries) * 100):.1f}%",
-            "unique_ips": len(metrics["unique_ips"]),
+            "unique_ips": len(combined_metrics["unique_ips"]),
         },
         "errors": {
             "count": error_count,
@@ -507,7 +551,7 @@ async def process_firewall_logs(saved_files: List[Dict], parser_name: str, pipel
         }
     }
     
-    logging.info(f"Firewall analysis complete: {len(all_entries)} entries, {error_count} errors")
+    logging.info(f"Enhanced firewall analysis complete: {len(all_entries)} entries, {error_count} errors")
     return result
 
 def get_port_services():

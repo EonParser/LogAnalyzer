@@ -136,13 +136,17 @@ class PFSenseLogParser(FirewallLogParser):
                 hostname = hostname_match.group(1)
                 process = hostname_match.group(2)
             
-            # Check if this is a filterlog entry
+            # Check if this is a filterlog entry (most common pfSense format)
             if "filterlog:" in line:
                 # Extract the CSV part after "filterlog:"
                 csv_part = line.split("filterlog:", 1)[1].strip()
                 return self._parse_filterlog(csv_part, timestamp, line)
             
-            # If not filterlog, try to parse as generic pfSense log
+            # If not filterlog, check for other pfSense formats
+            if "pf:" in line:
+                return self._parse_pf_log(line, timestamp)
+                
+            # Last resort - try to parse as generic pfSense log
             return self._parse_generic_pfsense(line, timestamp)
             
         except Exception as e:
@@ -159,9 +163,27 @@ class PFSenseLogParser(FirewallLogParser):
         Returns:
             LogEntry if successful, None if data is invalid
         """
-        # Split CSV fields
-        fields = csv_part.split(",")
-        if len(fields) < 10:  # Need at least basic fields
+        # Split CSV fields, handling commas within quoted values
+        fields = []
+        current_field = ""
+        in_quotes = False
+        
+        for char in csv_part:
+            if char == ',' and not in_quotes:
+                fields.append(current_field)
+                current_field = ""
+            elif char == '"':
+                in_quotes = not in_quotes
+                current_field += char
+            else:
+                current_field += char
+                
+        # Add the last field
+        fields.append(current_field)
+        
+        # Make sure we have enough fields
+        if len(fields) < 10:
+            # Not enough fields for valid filterlog
             return None
             
         # Determine if IPv4 or IPv6 based on field 8
@@ -180,9 +202,11 @@ class PFSenseLogParser(FirewallLogParser):
         # Parse fields based on the map
         for i, field_name in enumerate(field_map):
             if i < len(fields):
-                # Skip empty fields
-                if fields[i]:
-                    data[field_name] = fields[i]
+                # Skip empty fields and replace with None
+                if fields[i] and fields[i] != '""':
+                    data[field_name] = fields[i].strip('"')
+                else:
+                    data[field_name] = None
         
         # Set interface_in/out based on direction
         if "direction" in data and "interface" in data:
@@ -190,6 +214,10 @@ class PFSenseLogParser(FirewallLogParser):
                 data["interface_in"] = data["interface"]
             elif data["direction"] == "out":
                 data["interface_out"] = data["interface"]
+        
+        # Normalize action field
+        if "action" in data:
+            data["action"] = self.normalize_action(data["action"])
         
         # Extract IP information
         ip_info = self.extract_ips(data)
@@ -209,8 +237,8 @@ class PFSenseLogParser(FirewallLogParser):
         protocol_str = data.get("protocol_name", data.get("protocol", "unknown")).upper()
         src_ip = data.get("src", "unknown")
         dst_ip = data.get("dst", "unknown")
-        src_port = f":{data.get('src_port', '')}" if "src_port" in data else ""
-        dst_port = f":{data.get('dst_port', '')}" if "dst_port" in data else ""
+        src_port = f":{data.get('src_port', '')}" if "src_port" in data and data["src_port"] else ""
+        dst_port = f":{data.get('dst_port', '')}" if "dst_port" in data and data["dst_port"] else ""
         
         message = f"{action.upper()} {protocol_str} {src_ip}{src_port} -> {dst_ip}{dst_port}"
         
@@ -224,6 +252,11 @@ class PFSenseLogParser(FirewallLogParser):
         rule_id = data.get("rule_id")
         if rule_id:
             message += f" [Rule:{rule_id}]"
+            
+        # Add reason if available
+        reason = data.get("reason")
+        if reason:
+            message += f" [{reason}]"
         
         # Create log entry
         return self.create_log_entry(
