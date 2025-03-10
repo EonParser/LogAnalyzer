@@ -44,7 +44,7 @@
                         <!-- Left Column - File Upload -->
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-2">Log Files</label>
-                            <div class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
+                            <div id="drop-zone" class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
                                 <div class="space-y-1 text-center">
                                     <svg class="mx-auto h-12 w-12 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
                                         <path fill-rule="evenodd" d="M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z" clip-rule="evenodd" />
@@ -141,15 +141,20 @@
 
         // Simple file selection display
         document.getElementById('file-upload').addEventListener('change', function(e) {
+            updateFileList(e.target.files);
+        });
+
+        // Helper function to update file list display
+        function updateFileList(files) {
             const fileList = document.getElementById('fileList');
-            const files = Array.from(e.target.files);
+            const filesArray = Array.from(files);
             
-            if (files.length > 0) {
-                fileList.innerHTML = `<p>${files.length} file(s) selected:</p>`;
+            if (filesArray.length > 0) {
+                fileList.innerHTML = `<p>${filesArray.length} file(s) selected:</p>`;
                 const ul = document.createElement('ul');
                 ul.className = 'list-disc list-inside';
                 
-                files.forEach(file => {
+                filesArray.forEach(file => {
                     const li = document.createElement('li');
                     li.textContent = file.name;
                     li.className = 'truncate';
@@ -160,7 +165,7 @@
             } else {
                 fileList.innerHTML = '';
             }
-        });
+        }
 
         // Form submission with AJAX
         document.getElementById('analyzeForm').addEventListener('submit', function(e) {
@@ -522,6 +527,122 @@
             // Add all sections to the results div
             resultDiv.innerHTML = metricsHTML + blockedPortsHTML + blockedIPsHTML + trafficSourcesHTML;
         }
+
+        // Drag and drop functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            // Get references to the file upload elements
+            const dropZone = document.getElementById('drop-zone');
+            const fileInput = document.getElementById('file-upload');
+            
+            // Prevent default drag behaviors
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, preventDefaults, false);
+                document.body.addEventListener(eventName, preventDefaults, false);
+            });
+            
+// Highlight drop zone when item is dragged over it
+['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, highlight, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, unhighlight, false);
+            });
+            
+            // Handle dropped files
+            dropZone.addEventListener('drop', handleDrop, false);
+            
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            function highlight() {
+                dropZone.classList.add('bg-blue-50');
+                dropZone.classList.add('border-blue-300');
+            }
+            
+            function unhighlight() {
+                dropZone.classList.remove('bg-blue-50');
+                dropZone.classList.remove('border-blue-300');
+            }
+            
+            function handleDrop(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                
+                // Filter for only .log and .txt files
+                const validFiles = Array.from(files).filter(file => 
+                    file.name.endsWith('.log') || file.name.endsWith('.txt')
+                );
+                
+                if (validFiles.length === 0) {
+                    alert('Please upload .log or .txt files only');
+                    return;
+                }
+                
+                if (validFiles.length !== files.length) {
+                    alert('Some files were skipped. Only .log and .txt files are supported.');
+                }
+                
+                // Set the files to the file input
+                // Note: This is not directly possible due to security restrictions
+                // Instead, we'll update the UI and form data will be handled during submission
+                
+                // Update the file list UI
+                updateFileList(validFiles);
+                
+                // Store the valid files for form submission
+                window.droppedFiles = validFiles;
+            }
+        });
+        
+        // Override form submission to include dropped files
+        const originalSubmit = document.getElementById('analyzeForm').onsubmit;
+        document.getElementById('analyzeForm').onsubmit = function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            
+            // If we have dropped files, use those instead of the file input
+            if (window.droppedFiles && window.droppedFiles.length > 0) {
+                // Remove any files from the form data that might have come from the file input
+                formData.delete('files');
+                
+                // Add each dropped file
+                window.droppedFiles.forEach(file => {
+                    formData.append('files', file);
+                });
+            }
+            
+            const resultDiv = document.getElementById('results');
+            
+            // Show loading indicator
+            resultDiv.innerHTML = `
+                <div class="flex items-center justify-center p-12 bg-white rounded-lg shadow">
+                    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+                    <span class="ml-3 text-lg font-medium text-gray-700">Analyzing logs...</span>
+                </div>
+            `;
+            
+            fetch('/analyze', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Start polling for results
+                pollResults(data.task_id, resultDiv);
+            })
+            .catch(error => {
+                resultDiv.innerHTML = `
+                    <div class="bg-red-50 border border-red-200 text-red-700 p-4 rounded-md">
+                        <h3 class="font-bold">Error</h3>
+                        <p>${error.message || 'Failed to start analysis'}</p>
+                    </div>
+                `;
+            });
+        };
     </script>
 </body>
 </html>
