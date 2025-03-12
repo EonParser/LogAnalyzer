@@ -3,12 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Log Analyzer</title>
+    <title>LogAnalyzer Enterprise</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 </head>
 <body class="bg-gray-100">
     <div class="min-h-screen">
-        <!-- Navigation -->
         <header class="bg-gray-900 text-white p-3 shadow">
             <div class="container mx-auto flex items-center justify-between">
                 <div class="flex items-center">
@@ -21,7 +23,6 @@
                         <span class="font-bold text-xl">LogAnalyzer</span>
                         <span class="ml-2 text-green-400 text-sm">Enterprise</span>
                     </div>
-
                     <div class="hidden md:flex ml-8">
                         <a href="#" class="px-4 py-2 rounded-md bg-blue-600">Search</a>
                         <a href="#" class="px-4 py-2 rounded-md hover:bg-gray-700">Analytics</a>
@@ -31,69 +32,8 @@
                 </div>
             </div>
         </header>
-
-        <!-- Main Content -->
-        <main class="container mx-auto px-4 py-8">
-            <h1 class="text-3xl font-bold mb-8">Log Analyzer</h1>
-            
-            <div class="bg-white rounded-lg shadow p-6 mb-8">
-                <h2 class="text-xl font-semibold mb-4">Analyze Logs</h2>
-                <form id="analyzeForm" action="/analyze" method="post" enctype="multipart/form-data" class="space-y-6">
-                    <!-- Split into two columns on medium screens and up -->
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <!-- Left Column - File Upload -->
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Log Files</label>
-                            <div id="drop-zone" class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
-                                <div class="space-y-1 text-center">
-                                    <svg class="mx-auto h-12 w-12 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fill-rule="evenodd" d="M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z" clip-rule="evenodd" />
-                                    </svg>
-                                    <div class="flex text-sm text-gray-600">
-                                        <label for="file-upload" class="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500">
-                                            <span>Upload files</span>
-                                            <input id="file-upload" name="files" type="file" multiple accept=".log,.txt" class="sr-only">
-                                        </label>
-                                        <p class="pl-1">or drag and drop</p>
-                                    </div>
-                                    <p class="text-xs text-gray-500">Support for .log, .txt files</p>
-                                </div>
-                            </div>
-                            <div id="fileList" class="mt-3 text-sm text-gray-500"></div>
-                        </div>
-
-                        <!-- Right Column - Settings -->
-                        <div class="space-y-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Log Type</label>
-                                <select id="logType" name="log_type" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
-                                    <option value="standard">Standard Logs</option>
-                                    <option value="firewall">Firewall Logs</option>
-                                </select>
-                            </div>
-
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Parser</label>
-                                <select id="parser" name="parser" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
-                                    <!-- Parser options will be dynamically populated -->
-                                </select>
-                            </div>
-
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Filters</label>
-                                <input type="text" name="filters" placeholder="e.g. level=='ERROR'" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
-                            </div>
-
-                            <button type="submit" class="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                                Analyze Logs
-                            </button>
-                        </div>
-                    </div>
-                </form>
-            </div>
-
-            <!-- Results will be loaded here -->
-            <div id="results"></div>
+        <main class="container mx-auto px-4 py-8" id="root">
+            <!-- App will be rendered here -->
         </main>
     </div>
 
@@ -109,7 +49,7 @@
                 { value: 'syslog', text: 'Syslog' }
             ],
             'firewall': [
-                { value: 'firewall', text: 'Auto-detect Firewall' },
+                { value: '', text: 'Auto-detect Firewall' },
                 { value: 'iptables', text: 'IPTables' },
                 { value: 'pfsense', text: 'pfSense' },
                 { value: 'cisco_asa', text: 'Cisco ASA' },
@@ -117,532 +57,704 @@
             ]
         };
 
-        // Update parser options when log type changes
-        function updateParserOptions(logType) {
-            const parserSelect = document.getElementById('parser');
-            parserSelect.innerHTML = '';
-            
-            const options = parserOptions[logType] || parserOptions['standard'];
-            options.forEach(option => {
-                const optionElement = document.createElement('option');
-                optionElement.value = option.value;
-                optionElement.textContent = option.text;
-                parserSelect.appendChild(optionElement);
-            });
-        }
+        // Load component scripts - defined in window to avoid conflicts
+        window.Components = {};
+    </script>
 
-        // Initialize parser options
-        updateParserOptions('standard');
+    <!-- Load component files -->
+    <script src="/components/MetricsOverview.js"></script>
+    <script src="/components/HttpAnalysis.js"></script>
+    <script src="/components/ErrorAnalysis.js"></script>
+    <script src="/components/SecurityAnalysis.js"></script>
+    <script src="/components/PerformanceAnalysis.js"></script>
+    <script src="/components/TimeAnalysis.js"></script>
+    <script src="/components/FirewallDashboard.js"></script>
+    <script src="/components/LogFilters.js"></script>
 
-        // Listen for changes to log type
-        document.getElementById('logType').addEventListener('change', function() {
-            updateParserOptions(this.value);
-        });
+    <!-- Main React App -->
+    <script>
+        const App = () => {
+            // State
+            const [files, setFiles] = React.useState([]);
+            const [loading, setLoading] = React.useState(false);
+            const [results, setResults] = React.useState(null);
+            const [error, setError] = React.useState(null);
+            const [logType, setLogType] = React.useState('standard');
+            const [parser, setParser] = React.useState('');
+            const [filters, setFilters] = React.useState('');
+            const [fieldFilters, setFieldFilters] = React.useState({});
+            const [activeFilters, setActiveFilters] = React.useState({});
 
-        // Simple file selection display
-        document.getElementById('file-upload').addEventListener('change', function(e) {
-            updateFileList(e.target.files);
-        });
+            // Drag and drop reference
+            const dropZoneRef = React.useRef(null);
 
-        // Helper function to update file list display
-        function updateFileList(files) {
-            const fileList = document.getElementById('fileList');
-            const filesArray = Array.from(files);
-            
-            if (filesArray.length > 0) {
-                fileList.innerHTML = `<p>${filesArray.length} file(s) selected:</p>`;
-                const ul = document.createElement('ul');
-                ul.className = 'list-disc list-inside';
+            // Setup drag and drop on mount
+            React.useEffect(() => {
+                const dropZone = dropZoneRef.current;
+                if (!dropZone) return;
                 
-                filesArray.forEach(file => {
-                    const li = document.createElement('li');
-                    li.textContent = file.name;
-                    li.className = 'truncate';
-                    ul.appendChild(li);
-                });
+                const preventDefaults = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return false;
+                };
                 
-                fileList.appendChild(ul);
-            } else {
-                fileList.innerHTML = '';
-            }
-        }
-
-        // Form submission with AJAX
-        document.getElementById('analyzeForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            const formData = new FormData(this);
-            const resultDiv = document.getElementById('results');
-            
-            // Show loading indicator
-            resultDiv.innerHTML = `
-                <div class="flex items-center justify-center p-12 bg-white rounded-lg shadow">
-                    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-                    <span class="ml-3 text-lg font-medium text-gray-700">Analyzing logs...</span>
-                </div>
-            `;
-            
-            fetch('/analyze', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                // Start polling for results
-                pollResults(data.task_id, resultDiv);
-            })
-            .catch(error => {
-                resultDiv.innerHTML = `
-                    <div class="bg-red-50 border border-red-200 text-red-700 p-4 rounded-md">
-                        <h3 class="font-bold">Error</h3>
-                        <p>${error.message || 'Failed to start analysis'}</p>
-                    </div>
-                `;
-            });
-        });
-
-        function pollResults(taskId, resultDiv) {
-            fetch(`/tasks/${taskId}`)
-                .then(response => response.json())
-                .then(taskStatus => {
-                    if (taskStatus.status === 'completed' && taskStatus.results) {
-                        displayResults(taskStatus.results, resultDiv);
-                    } else if (taskStatus.status === 'failed') {
-                        resultDiv.innerHTML = `
-                            <div class="bg-red-50 border border-red-200 text-red-700 p-4 rounded-md">
-                                <h3 class="font-bold">Analysis Failed</h3>
-                                <p>${taskStatus.error || 'Unknown error occurred'}</p>
-                            </div>
-                        `;
-                    } else if (taskStatus.status === 'processing') {
-                        setTimeout(() => pollResults(taskId, resultDiv), 1000);
+                const highlight = () => {
+                    dropZone.classList.add('bg-blue-50', 'border-blue-300');
+                };
+                
+                const unhighlight = () => {
+                    dropZone.classList.remove('bg-blue-50', 'border-blue-300');
+                };
+                
+                const handleDrop = (e) => {
+                    unhighlight();
+                    preventDefaults(e);
+                    
+                    const dt = e.dataTransfer;
+                    if (!dt || !dt.files || dt.files.length === 0) return;
+                    
+                    const validFiles = Array.from(dt.files).filter(file => 
+                        file.name.endsWith('.log') || file.name.endsWith('.txt')
+                    );
+                    
+                    if (validFiles.length === 0) {
+                        alert('Please upload .log or .txt files only');
+                        return;
                     }
-                })
-                .catch(error => {
-                    resultDiv.innerHTML = `
-                        <div class="bg-red-50 border border-red-200 text-red-700 p-4 rounded-md">
-                            <h3 class="font-bold">Error</h3>
-                            <p>${error.message || 'Failed to check task status'}</p>
-                        </div>
-                    `;
-                });
-        }
+                    
+                    if (validFiles.length !== dt.files.length) {
+                        alert('Some files were skipped. Only .log and .txt files are supported.');
+                    }
+                    
+                    setFiles(validFiles);
+                };
+                
+                // Add event listeners
+                dropZone.addEventListener('dragenter', preventDefaults);
+                dropZone.addEventListener('dragover', preventDefaults);
+                dropZone.addEventListener('dragleave', preventDefaults);
+                dropZone.addEventListener('drop', preventDefaults);
+                
+                dropZone.addEventListener('dragenter', highlight);
+                dropZone.addEventListener('dragover', highlight);
+                dropZone.addEventListener('dragleave', unhighlight);
+                dropZone.addEventListener('drop', handleDrop);
+                
+                document.body.addEventListener('dragenter', preventDefaults);
+                document.body.addEventListener('dragover', preventDefaults);
+                document.body.addEventListener('dragleave', preventDefaults);
+                document.body.addEventListener('drop', preventDefaults);
+                
+                // Cleanup
+                return () => {
+                    dropZone.removeEventListener('dragenter', preventDefaults);
+                    dropZone.removeEventListener('dragover', preventDefaults);
+                    dropZone.removeEventListener('dragleave', preventDefaults);
+                    dropZone.removeEventListener('drop', preventDefaults);
+                    
+                    dropZone.removeEventListener('dragenter', highlight);
+                    dropZone.removeEventListener('dragover', highlight);
+                    dropZone.removeEventListener('dragleave', unhighlight);
+                    dropZone.removeEventListener('drop', handleDrop);
+                    
+                    document.body.removeEventListener('dragenter', preventDefaults);
+                    document.body.removeEventListener('dragover', preventDefaults);
+                    document.body.removeEventListener('dragleave', preventDefaults);
+                    document.body.removeEventListener('drop', preventDefaults);
+                };
+            }, []);
 
-        function displayResults(results, resultDiv) {
-            // Clear the loading indicator
-            resultDiv.innerHTML = '';
-            
-            // Check if this is a firewall analysis
-            if (results.firewall_analysis) {
-                displayFirewallResults(results.firewall_analysis, resultDiv);
-            } else {
-                displayStandardResults(results, resultDiv);
-            }
-        }
+            // File input change handler
+            const handleFileChange = (e) => {
+                if (!e.target.files || e.target.files.length === 0) return;
+                setFiles(Array.from(e.target.files));
+            };
 
-        function displayStandardResults(results, resultDiv) {
-            // Summary metrics
-            const summaryHTML = `
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                    <div class="bg-blue-50 border border-blue-100 rounded-lg p-4">
-                        <div class="text-sm text-blue-600 font-medium">TOTAL ENTRIES</div>
-                        <div class="text-2xl font-bold mt-1">${results.summary.total_entries.toLocaleString()}</div>
-                    </div>
-                    <div class="bg-red-50 border border-red-100 rounded-lg p-4">
-                        <div class="text-sm text-red-600 font-medium">ERROR RATE</div>
-                        <div class="text-2xl font-bold mt-1">${results.summary.error_rate}</div>
-                    </div>
-                    <div class="bg-green-50 border border-green-100 rounded-lg p-4">
-                        <div class="text-sm text-green-600 font-medium">AVG RESPONSE TIME</div>
-                        <div class="text-2xl font-bold mt-1">${results.summary.average_response_time}</div>
-                    </div>
-                    <div class="bg-purple-50 border border-purple-100 rounded-lg p-4">
-                        <div class="text-sm text-purple-600 font-medium">UNIQUE IPs</div>
-                        <div class="text-2xl font-bold mt-1">${results.summary.unique_ips.toLocaleString()}</div>
-                    </div>
-                </div>
-            `;
-            
-            // HTTP Analysis
-            const httpAnalysisHTML = results.http_analysis ? `
-                <div class="bg-white rounded-lg shadow p-6 mb-6">
-                    <h3 class="text-lg font-semibold mb-4">HTTP Analysis</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <h4 class="text-sm font-medium text-gray-700 mb-4">Status Distribution</h4>
-                            <div class="space-y-4">
-                                ${Object.entries(results.http_analysis.status_distribution || {}).map(([code, count]) => `
-                                    <div class="space-y-1">
-                                        <div class="flex justify-between text-sm">
-                                            <span>${code}</span>
-                                            <span>${count.toLocaleString()}</span>
-                                        </div>
-                                        <div class="w-full bg-gray-200 rounded-full h-2">
-                                            <div class="rounded-full h-2 ${
-                                                code.startsWith('2') ? 'bg-green-500' :
-                                                code.startsWith('3') ? 'bg-blue-500' :
-                                                code.startsWith('4') ? 'bg-yellow-500' : 'bg-red-500'
-                                            }" style="width: ${(count / results.summary.total_entries * 100)}%"></div>
-                                        </div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                        <div>
-                            <h4 class="text-sm font-medium text-gray-700 mb-4">Top Endpoints</h4>
-                            <div class="space-y-3">
-                                ${(results.http_analysis.top_endpoints || []).map(endpoint => `
-                                    <div class="flex justify-between items-center bg-gray-50 p-2 rounded">
-                                        <span class="text-sm truncate flex-1">${endpoint.endpoint}</span>
-                                        <span class="text-sm font-medium ml-4">${endpoint.requests.toLocaleString()}</span>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            ` : '';
-            
-            // Error Analysis
-            const errorAnalysisHTML = results.error_analysis ? `
-                <div class="bg-white rounded-lg shadow p-6 mb-6">
-                    <h3 class="text-lg font-semibold mb-4">Error Analysis</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <h4 class="text-sm font-medium text-gray-700 mb-4">Error Patterns</h4>
-                            <div class="space-y-3">
-                                ${(results.error_analysis.top_error_patterns || []).map(pattern => `
-                                    <div class="bg-gray-50 p-3 rounded">
-                                        <div class="text-sm font-medium truncate">${pattern.pattern}</div>
-                                        <div class="text-sm text-gray-600 mt-1">Count: ${pattern.count} (${pattern.percentage})</div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                        <div>
-                            <h4 class="text-sm font-medium text-gray-700 mb-4">Error Timeline</h4>
-                            <div class="space-y-3">
-                                ${(results.error_analysis.error_timeline?.error_trends || []).slice(-5).map(trend => `
-                                    <div class="flex justify-between items-center bg-gray-50 p-2 rounded">
-                                        <span class="text-sm">${trend.hour}</span>
-                                        <span class="text-sm text-red-600">${trend.count} errors (${trend.rate})</span>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            ` : '';
-            
-            // Security Analysis
-            const securityAnalysisHTML = results.security_analysis ? `
-                <div class="bg-white rounded-lg shadow p-6 mb-6">
-                    <h3 class="text-lg font-semibold mb-4">Security Analysis</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <h4 class="text-sm font-medium text-gray-700 mb-4">Suspicious IPs</h4>
-                            <div class="space-y-3">
-                                ${(results.security_analysis.ip_statistics?.suspicious_ips || []).map(ip => `
-                                    <div class="bg-gray-50 p-3 rounded">
-                                        <div class="flex justify-between">
-                                            <span class="text-sm font-medium">${ip.ip}</span>
-                                            <span class="text-sm text-red-600">${ip.failed_attempts} failed attempts</span>
-                                        </div>
-                                        <div class="text-sm text-gray-600 mt-1">Failure Rate: ${ip.failure_rate}</div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                        <div>
-                            <h4 class="text-sm font-medium text-gray-700 mb-4">Top User Agents</h4>
-                            <div class="space-y-3">
-                                ${(results.security_analysis.user_agents || []).map(agent => `
-                                    <div class="bg-gray-50 p-2 rounded">
-                                        <div class="text-sm truncate">${agent.user_agent}</div>
-                                        <div class="text-sm text-gray-600">
-                                            ${agent.count.toLocaleString()} requests (${agent.percentage})
-                                        </div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            ` : '';
-            
-            // Performance Analysis
-            const performanceAnalysisHTML = results.performance_metrics ? `
-                <div class="bg-white rounded-lg shadow p-6 mb-6">
-                    <h3 class="text-lg font-semibold mb-4">Performance Analysis</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div class="bg-gray-50 p-4 rounded-lg">
-                            <h4 class="text-sm font-medium text-gray-700 mb-2">Response Times</h4>
-                            <div class="space-y-2">
-                                ${Object.entries(results.performance_metrics.response_times || {}).map(([key, value]) => `
-                                    <div class="flex justify-between">
-                                        <span class="text-gray-600">${key.toUpperCase()}</span>
-                                        <span class="font-medium">${value}</span>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                        
-                        <div class="bg-gray-50 p-4 rounded-lg">
-                            <h4 class="text-sm font-medium text-gray-700 mb-2">Throughput</h4>
-                            <div class="space-y-2">
-                                <div class="flex justify-between">
-                                    <span class="text-gray-600">Requests/Second</span>
-                                    <span class="font-medium">${results.performance_metrics.throughput?.requests_per_second || 0}</span>
-                                </div>
-                                <div class="flex justify-between">
-                                    <span class="text-gray-600">Peak Hour</span>
-                                    <span class="font-medium">${results.performance_metrics.throughput?.peak_hour?.hour || 'N/A'}</span>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="bg-gray-50 p-4 rounded-lg">
-                            <h4 class="text-sm font-medium text-gray-700 mb-2">Slow Endpoints</h4>
-                            <div class="space-y-2">
-                                ${(results.performance_metrics.slow_endpoints || []).slice(0, 3).map(endpoint => `
-                                    <div class="text-sm">
-                                        <div class="font-medium truncate">${endpoint.endpoint}</div>
-                                        <div class="text-gray-600">${endpoint.average_time} (${endpoint.requests} requests)</div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            ` : '';
-            
-            // Add all sections to the results div
-            resultDiv.innerHTML = summaryHTML + 
-                                  httpAnalysisHTML + 
-                                  errorAnalysisHTML + 
-                                  securityAnalysisHTML + 
-                                  performanceAnalysisHTML;
-        }
-
-        function displayFirewallResults(firewallData, resultDiv) {
-            // Basic firewall metrics
-            const metricsHTML = `
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                    <div class="bg-blue-50 border border-blue-100 rounded-lg p-4">
-                        <div class="text-sm text-blue-600 font-medium">TOTAL ENTRIES</div>
-                        <div class="text-2xl font-bold mt-1">${firewallData.summary.total_entries.toLocaleString()}</div>
-                    </div>
-                    <div class="bg-green-50 border border-green-100 rounded-lg p-4">
-                        <div class="text-sm text-green-600 font-medium">ALLOWED CONNECTIONS</div>
-                        <div class="text-2xl font-bold mt-1">${firewallData.summary.allowed_connections.toLocaleString()}</div>
-                    </div>
-                    <div class="bg-red-50 border border-red-100 rounded-lg p-4">
-                        <div class="text-sm text-red-600 font-medium">BLOCKED CONNECTIONS</div>
-                        <div class="text-2xl font-bold mt-1">${firewallData.summary.blocked_connections.toLocaleString()}</div>
-                        <div class="text-sm text-gray-500">${firewallData.summary.blocked_percentage}% of all traffic</div>
-                    </div>
-                    <div class="bg-yellow-50 border border-yellow-100 rounded-lg p-4">
-                        <div class="text-sm text-yellow-600 font-medium">UNIQUE IPs</div>
-                        <div class="text-2xl font-bold mt-1">${firewallData.summary.unique_ips.toLocaleString()}</div>
-                    </div>
-                </div>
-            `;
-            
-            // Top Blocked Ports Table
-            const blockedPortsHTML = `
-                <div class="bg-white rounded-lg shadow p-6 mb-6">
-                    <h3 class="text-lg font-semibold mb-4">Top Blocked Ports</h3>
-                    <div class="overflow-x-auto">
-                        <table class="min-w-full divide-y divide-gray-200">
-                            <thead class="bg-gray-50">
-                                <tr>
-                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Port</th>
-                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Service</th>
-                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Count</th>
-                                </tr>
-                            </thead>
-                            <tbody class="bg-white divide-y divide-gray-200">
-                                ${(firewallData.top_blocked_ports || []).map(item => `
-                                    <tr>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${item.port}</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${item.service}</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${item.count}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            `;
-            
-            // Top Blocked IPs Table
-            const blockedIPsHTML = `
-                <div class="bg-white rounded-lg shadow p-6 mb-6">
-                    <h3 class="text-lg font-semibold mb-4">Top Blocked IPs</h3>
-                    <div class="overflow-x-auto">
-                        <table class="min-w-full divide-y divide-gray-200">
-                            <thead class="bg-gray-50">
-                                <tr>
-                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IP Address</th>
-                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Block Count</th>
-                                </tr>
-                            </thead>
-                            <tbody class="bg-white divide-y divide-gray-200">
-                                ${(firewallData.top_blocked_ips || []).map(item => `
-                                    <tr>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${item.ip}</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${item.count}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            `;
-            
-            // Top Traffic Sources Table
-            const trafficSourcesHTML = `
-                <div class="bg-white rounded-lg shadow p-6">
-                    <h3 class="text-lg font-semibold mb-4">Top Traffic Sources</h3>
-                    <div class="overflow-x-auto">
-                        <table class="min-w-full divide-y divide-gray-200">
-                            <thead class="bg-gray-50">
-                                <tr>
-                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IP Address</th>
-                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Connection Count</th>
-                                </tr>
-                            </thead>
-                            <tbody class="bg-white divide-y divide-gray-200">
-                                ${(firewallData.top_traffic_sources || []).map(item => `
-                                    <tr>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${item.ip}</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${item.count}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            `;
-            
-            // Add all sections to the results div
-            resultDiv.innerHTML = metricsHTML + blockedPortsHTML + blockedIPsHTML + trafficSourcesHTML;
-        }
-
-        // Drag and drop functionality
-        document.addEventListener('DOMContentLoaded', function() {
-            // Get references to the file upload elements
-            const dropZone = document.getElementById('drop-zone');
-            const fileInput = document.getElementById('file-upload');
-            
-            // Prevent default drag behaviors
-            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-                dropZone.addEventListener(eventName, preventDefaults, false);
-                document.body.addEventListener(eventName, preventDefaults, false);
-            });
-            
-// Highlight drop zone when item is dragged over it
-['dragenter', 'dragover'].forEach(eventName => {
-                dropZone.addEventListener(eventName, highlight, false);
-            });
-            
-            ['dragleave', 'drop'].forEach(eventName => {
-                dropZone.addEventListener(eventName, unhighlight, false);
-            });
-            
-            // Handle dropped files
-            dropZone.addEventListener('drop', handleDrop, false);
-            
-            function preventDefaults(e) {
+            // Form submission
+            const handleSubmit = async (e) => {
                 e.preventDefault();
-                e.stopPropagation();
-            }
-            
-            function highlight() {
-                dropZone.classList.add('bg-blue-50');
-                dropZone.classList.add('border-blue-300');
-            }
-            
-            function unhighlight() {
-                dropZone.classList.remove('bg-blue-50');
-                dropZone.classList.remove('border-blue-300');
-            }
-            
-            function handleDrop(e) {
-                const dt = e.dataTransfer;
-                const files = dt.files;
                 
-                // Filter for only .log and .txt files
-                const validFiles = Array.from(files).filter(file => 
-                    file.name.endsWith('.log') || file.name.endsWith('.txt')
-                );
-                
-                if (validFiles.length === 0) {
-                    alert('Please upload .log or .txt files only');
+                if (files.length === 0) {
+                    setError('Please select at least one log file');
                     return;
                 }
                 
-                if (validFiles.length !== files.length) {
-                    alert('Some files were skipped. Only .log and .txt files are supported.');
+                setLoading(true);
+                setError(null);
+                
+                try {
+                    const formData = new FormData();
+                    
+                    // Add files
+                    files.forEach(file => formData.append('files', file));
+                    
+                    // Add other form fields
+                    if (parser) formData.append('parser', parser);
+                    if (filters) formData.append('filters', filters);
+                    formData.append('log_type', logType);
+                    
+                    // Add field filters if any
+                    if (Object.keys(fieldFilters).length > 0) {
+                        formData.append('filter_fields', JSON.stringify(fieldFilters));
+                    }
+                    
+                    // Submit the request
+                    const response = await fetch('/analyze', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`Server responded with status: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    pollTaskStatus(data.task_id);
+                } catch (error) {
+                    setError(error.message);
+                    setLoading(false);
                 }
+            };
+
+            // Poll for task status
+            const pollTaskStatus = async (taskId) => {
+                try {
+                    const response = await fetch(`/tasks/${taskId}`);
+                    if (!response.ok) {
+                        throw new Error(`Server responded with status: ${response.status}`);
+                    }
+                    
+                    const taskStatus = await response.json();
+                    
+                    if (taskStatus.status === 'completed') {
+                        setResults(taskStatus.results);
+                        setLoading(false);
+                        
+                        // Check for detected fields
+                        if (taskStatus.results && taskStatus.results.detected_fields) {
+                            initializeFilters(taskStatus.results.detected_fields);
+                        }
+                    } else if (taskStatus.status === 'failed') {
+                        let errorDetails = taskStatus.error || 'Analysis failed';
+                        
+                        // Check for specific pipeline error
+                        if (taskStatus.results && taskStatus.results.errors && 
+                            taskStatus.results.errors.messages && 
+                            taskStatus.results.errors.messages.length > 0) {
+                            
+                            const firstError = taskStatus.results.errors.messages[0];
+                            if (firstError.includes("'function' object has no attribute 'process'")) {
+                                errorDetails = "Backend pipeline error: Try selecting a different parser for your firewall logs.";
+                            } else {
+                                errorDetails += `: ${firstError}`;
+                            }
+                        }
+                        
+                        setError(errorDetails);
+                        setLoading(false);
+                    } else {
+                        // Continue polling
+                        setTimeout(() => pollTaskStatus(taskId), 1000);
+                    }
+                } catch (error) {
+                    setError(`Failed to check task status: ${error.message}`);
+                    setLoading(false);
+                }
+            };
+
+            // Initialize filters
+            const initializeFilters = (fields) => {
+                const priorityOrder = [
+                    "level", "status", "method", "action", "ip", "port", 
+                    "user", "path", "protocol", "timestamp"
+                ];
                 
-                // Set the files to the file input
-                // Note: This is not directly possible due to security restrictions
-                // Instead, we'll update the UI and form data will be handled during submission
-                
-                // Update the file list UI
-                updateFileList(validFiles);
-                
-                // Store the valid files for form submission
-                window.droppedFiles = validFiles;
-            }
-        });
-        
-        // Override form submission to include dropped files
-        const originalSubmit = document.getElementById('analyzeForm').onsubmit;
-        document.getElementById('analyzeForm').onsubmit = function(e) {
-            e.preventDefault();
-            
-            const formData = new FormData(this);
-            
-            // If we have dropped files, use those instead of the file input
-            if (window.droppedFiles && window.droppedFiles.length > 0) {
-                // Remove any files from the form data that might have come from the file input
-                formData.delete('files');
-                
-                // Add each dropped file
-                window.droppedFiles.forEach(file => {
-                    formData.append('files', file);
+                // Sort fields by priority
+                const sortedFields = Object.values(fields).filter(field => 
+                    field.unique_values && field.unique_values.length <= 30
+                ).sort((a, b) => {
+                    const aPriority = priorityOrder.indexOf(a.standard_name);
+                    const bPriority = priorityOrder.indexOf(b.standard_name);
+                    
+                    if (aPriority === -1 && bPriority === -1) {
+                        return a.value_count - b.value_count;
+                    }
+                    
+                    if (aPriority === -1) return 1;
+                    if (bPriority === -1) return -1;
+                    
+                    return aPriority - bPriority;
                 });
-            }
-            
-            const resultDiv = document.getElementById('results');
-            
-            // Show loading indicator
-            resultDiv.innerHTML = `
-                <div class="flex items-center justify-center p-12 bg-white rounded-lg shadow">
-                    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-                    <span class="ml-3 text-lg font-medium text-gray-700">Analyzing logs...</span>
-                </div>
-            `;
-            
-            fetch('/analyze', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                // Start polling for results
-                pollResults(data.task_id, resultDiv);
-            })
-            .catch(error => {
-                resultDiv.innerHTML = `
-                    <div class="bg-red-50 border border-red-200 text-red-700 p-4 rounded-md">
-                        <h3 class="font-bold">Error</h3>
-                        <p>${error.message || 'Failed to start analysis'}</p>
-                    </div>
-                `;
-            });
+                
+                // Initialize active filters
+                const newActiveFilters = {};
+                sortedFields.forEach(field => {
+                    newActiveFilters[field.name] = [];
+                });
+                
+                setActiveFilters(newActiveFilters);
+                
+                // Show filter panel
+                const filterPanel = document.getElementById('filterPanel');
+                if (filterPanel) {
+                    filterPanel.classList.remove('hidden');
+                }
+            };
+
+            // Handle filter checkbox change
+            const handleFilterChange = (field, value, checked) => {
+                setActiveFilters(prev => {
+                    const updated = {...prev};
+                    
+                    if (checked) {
+                        if (!updated[field].includes(value)) {
+                            updated[field] = [...updated[field], value];
+                        }
+                    } else {
+                        updated[field] = updated[field].filter(v => v !== value);
+                    }
+                    
+                    return updated;
+                });
+            };
+
+            // Apply filters
+            const handleApplyFilters = () => {
+                // Filter out empty arrays
+                const filtersToApply = {};
+                Object.entries(activeFilters).forEach(([key, values]) => {
+                    if (values.length > 0) {
+                        filtersToApply[key] = values;
+                    }
+                });
+                
+                if (Object.keys(filtersToApply).length > 0) {
+                    setFieldFilters(filtersToApply);
+                    handleSubmit({ preventDefault: () => {} });
+                }
+            };
+
+            // Reset filters
+            const handleResetFilters = () => {
+                const checkboxes = document.querySelectorAll('.field-filter-checkbox');
+                checkboxes.forEach(checkbox => {
+                    checkbox.checked = false;
+                });
+                
+                setActiveFilters(prev => {
+                    const reset = {};
+                    Object.keys(prev).forEach(key => {
+                        reset[key] = [];
+                    });
+                    return reset;
+                });
+            };
+
+            // Format file size for display
+            const formatFileSize = (bytes) => {
+                if (bytes < 1024) return bytes + ' bytes';
+                else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+                else return (bytes / 1048576).toFixed(1) + ' MB';
+            };
+
+            // Render field filters
+            const renderFieldFilters = () => {
+                if (!results || !results.detected_fields) return null;
+                
+                const fields = Object.values(results.detected_fields).filter(field => 
+                    field.unique_values && field.unique_values.length <= 30
+                );
+                
+                if (fields.length === 0) return null;
+                
+                return React.createElement('div', {
+                    id: 'fieldFilters',
+                    className: 'space-y-4'
+                }, fields.map(field => {
+                    const fieldName = field.name;
+                    const displayName = field.standard_name !== field.name ? field.standard_name : field.name;
+                    
+                    return React.createElement('div', {
+                        key: fieldName,
+                        className: 'border border-gray-200 rounded mb-4'
+                    }, [
+                        // Field header with toggle
+                        React.createElement('div', {
+                            className: 'p-3 bg-gray-50 border-b border-gray-200 flex justify-between items-center cursor-pointer',
+                            onClick: (e) => {
+                                const container = e.currentTarget.nextSibling;
+                                const icon = e.currentTarget.querySelector('svg');
+                                container.classList.toggle('hidden');
+                                icon?.classList.toggle('transform');
+                                icon?.classList.toggle('rotate-180');
+                            },
+                            key: 'header'
+                        }, [
+                            React.createElement('span', { 
+                                className: 'font-medium',
+                                key: 'name'
+                            }, displayName),
+                            React.createElement('svg', {
+                                className: 'w-5 h-5 text-gray-500',
+                                viewBox: '0 0 20 20',
+                                fill: 'currentColor',
+                                key: 'icon'
+                            }, [
+                                React.createElement('path', {
+                                    fillRule: 'evenodd',
+                                    d: 'M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z',
+                                    clipRule: 'evenodd',
+                                    key: 'path'
+                                })
+                            ])
+                        ]),
+                        
+                        // Values container (initially hidden)
+                        React.createElement('div', {
+                            className: 'p-3 border-t border-gray-200 hidden',
+                            key: 'values'
+                        }, field.unique_values.map(value => {
+                            const id = `${fieldName}-${value.toString().replace(/[^a-zA-Z0-9]/g, '_')}`;
+                            
+                            return React.createElement('div', {
+                                className: 'flex items-center mb-2',
+                                key: value
+                            }, [
+                                React.createElement('input', {
+                                    type: 'checkbox',
+                                    id: id,
+                                    className: 'field-filter-checkbox mr-2',
+                                    onChange: (e) => handleFilterChange(fieldName, value, e.target.checked),
+                                    key: 'checkbox'
+                                }),
+                                React.createElement('label', {
+                                    htmlFor: id,
+                                    className: 'text-sm',
+                                    key: 'label'
+                                }, value)
+                            ]);
+                        }))
+                    ]);
+                }));
+            };
+
+            // Main render
+            return React.createElement('div', null, [
+                // Title
+                React.createElement('h1', { 
+                    className: 'text-3xl font-bold mb-8',
+                    key: 'title'
+                }, 'Log Analyzer'),
+                
+                // Upload form
+                React.createElement('form', {
+                    className: 'bg-white rounded-lg shadow p-6 mb-8',
+                    onSubmit: handleSubmit,
+                    key: 'form'
+                }, [
+                    React.createElement('h2', { 
+                        className: 'text-xl font-semibold mb-4',
+                        key: 'form-title'
+                    }, 'Analyze Logs'),
+                    
+                    // Form grid layout
+                    React.createElement('div', {
+                        className: 'grid grid-cols-1 md:grid-cols-2 gap-6',
+                        key: 'form-grid'
+                    }, [
+                        // File Upload Section
+                        React.createElement('div', { key: 'file-section' }, [
+                            React.createElement('label', {
+                                className: 'block text-sm font-medium text-gray-700 mb-2',
+                                htmlFor: 'file-upload',
+                                key: 'file-label'
+                            }, 'Log Files'),
+                            
+                            // Drop zone
+                            React.createElement('div', {
+                                id: 'drop-zone',
+                                ref: dropZoneRef,
+                                className: 'mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md',
+                                key: 'drop-zone'
+                            }, [
+                                React.createElement('div', {
+                                    className: 'space-y-1 text-center',
+                                    key: 'drop-content'
+                                }, [
+                                    // Upload icon
+                                    React.createElement('svg', {
+                                        className: 'mx-auto h-12 w-12 text-gray-400',
+                                        xmlns: 'http://www.w3.org/2000/svg',
+                                        viewBox: '0 0 20 20',
+                                        fill: 'currentColor',
+                                        key: 'upload-icon'
+                                    }, [
+                                        React.createElement('path', {
+                                            fillRule: 'evenodd',
+                                            d: 'M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z',
+                                            clipRule: 'evenodd',
+                                            key: 'path'
+                                        })
+                                    ]),
+                                    
+                                    // Upload text
+                                    React.createElement('div', {
+                                        className: 'flex text-sm text-gray-600',
+                                        key: 'upload-text'
+                                    }, [
+                                        React.createElement('label', {
+                                            htmlFor: 'file-upload',
+                                            className: 'relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500',
+                                            key: 'upload-label'
+                                        }, [
+                                            React.createElement('span', { key: 'upload-span' }, 'Upload files'),
+                                            React.createElement('input', {
+                                                id: 'file-upload',
+                                                name: 'files',
+                                                type: 'file',
+                                                multiple: true,
+                                                accept: '.log,.txt',
+                                                className: 'sr-only',
+                                                onChange: handleFileChange,
+                                                key: 'file-input'
+                                            })
+                                        ]),
+                                        React.createElement('p', { 
+                                            className: 'pl-1',
+                                            key: 'drag-text'
+                                        }, 'or drag and drop')
+                                    ]),
+                                    
+                                    // Support text
+                                    React.createElement('p', {
+                                        className: 'text-xs text-gray-500',
+                                        key: 'support-text'
+                                    }, 'Support for .log, .txt files')
+                                ])
+                            ]),
+                            
+                            // File list
+                            React.createElement('div', {
+                                id: 'fileList',
+                                className: 'mt-3 text-sm text-gray-500',
+                                key: 'file-list'
+                            }, files.length > 0 && [
+                                React.createElement('p', { key: 'count' }, `${files.length} file(s) selected:`),
+                                React.createElement('ul', { 
+                                    className: 'list-disc list-inside',
+                                    key: 'list'
+                                }, files.map((file, index) => 
+                                    React.createElement('li', { 
+                                        key: index,
+                                        className: 'truncate'
+                                    }, `${file.name} (${formatFileSize(file.size)})`)
+                                ))
+                            ])
+                        ]),
+                        
+                        // Settings Section
+                        React.createElement('div', {
+                            className: 'space-y-4',
+                            key: 'settings-section'
+                        }, [
+                            // Log Type
+                            React.createElement('div', { key: 'log-type' }, [
+                                React.createElement('label', {
+                                    className: 'block text-sm font-medium text-gray-700 mb-2',
+                                    htmlFor: 'logType',
+                                    key: 'log-type-label'
+                                }, 'Log Type'),
+                                
+                                React.createElement('select', {
+                                    id: 'logType',
+                                    name: 'log_type',
+                                    className: 'mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md',
+                                    value: logType,
+                                    onChange: (e) => {
+                                        setLogType(e.target.value);
+                                        setParser(''); // Reset parser when log type changes
+                                    },
+                                    key: 'log-type-select'
+                                }, [
+                                    React.createElement('option', {
+                                        value: 'standard',
+                                        key: 'standard'
+                                    }, 'Standard Logs'),
+                                    React.createElement('option', {
+                                        value: 'firewall',
+                                        key: 'firewall'
+                                    }, 'Firewall Logs')
+                                ])
+                            ]),
+                            
+                            // Parser
+                            React.createElement('div', { key: 'parser' }, [
+                                React.createElement('label', {
+                                    className: 'block text-sm font-medium text-gray-700 mb-2',
+                                    htmlFor: 'parser',
+                                    key: 'parser-label'
+                                }, 'Parser'),
+                                
+                                React.createElement('select', {
+                                    id: 'parser',
+                                    name: 'parser',
+                                    className: 'mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md',
+                                    value: parser,
+                                    onChange: (e) => setParser(e.target.value),
+                                    key: 'parser-select'
+                                }, (parserOptions[logType] || []).map(option => 
+                                    React.createElement('option', {
+                                        value: option.value,
+                                        key: option.value
+                                    }, option.text)
+                                ))
+                            ]),
+                            
+                            // Filters
+                            React.createElement('div', { key: 'filters' }, [
+                                React.createElement('label', {
+                                    className: 'block text-sm font-medium text-gray-700 mb-2',
+                                    htmlFor: 'filters',
+                                    key: 'filters-label'
+                                }, 'Manual Filters'),
+                                
+                                React.createElement('input', {
+                                    id: 'filters',
+                                    type: 'text',
+                                    name: 'filters',
+                                    placeholder: "e.g. level=='ERROR'",
+                                    className: 'mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md',
+                                    value: filters,
+                                    onChange: (e) => setFilters(e.target.value),
+                                    key: 'filters-input'
+                                }),
+                                
+                                React.createElement('p', {
+                                    className: 'mt-1 text-xs text-gray-500',
+                                    key: 'filters-help'
+                                }, 'Custom Python expressions for advanced filtering')
+                            ]),
+                            
+                            // Submit button
+                            React.createElement('button', {
+                                type: 'submit',
+                                className: 'w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500',
+                                disabled: loading || files.length === 0,
+                                key: 'submit-button'
+                            }, loading ? 'Analyzing...' : 'Analyze Logs')
+                        ])
+                    ])
+                ]),
+                
+                // Field Filters Panel (initially hidden)
+                React.createElement('div', {
+                    id: 'filterPanel',
+                    className: 'bg-white rounded-lg shadow p-6 mb-6 hidden',
+                    key: 'filter-panel'
+                }, [
+                    React.createElement('h2', {
+                        className: 'text-xl font-semibold mb-4',
+                        key: 'filter-title'
+                    }, 'Field Filters'),
+                    
+                    renderFieldFilters(),
+                    
+                    React.createElement('div', {
+                        className: 'flex justify-end space-x-2 mt-4',
+                        key: 'filter-actions'
+                    }, [
+                        React.createElement('button', {
+                            id: 'resetFilters',
+                            type: 'button',
+                            className: 'px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50',
+                            onClick: handleResetFilters,
+                            key: 'reset-button'
+                        }, 'Reset'),
+                        
+                        React.createElement('button', {
+                            id: 'applyFilters',
+                            type: 'button',
+                            className: 'px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700',
+                            onClick: handleApplyFilters,
+                            key: 'apply-button'
+                        }, 'Apply Filters')
+                    ])
+                ]),
+                
+                // Error message
+                error && React.createElement('div', {
+                    className: 'bg-red-50 border border-red-200 text-red-700 p-4 rounded-md mb-6',
+                    key: 'error'
+                }, [
+                    React.createElement('h3', {
+                        className: 'font-bold',
+                        key: 'error-title'
+                    }, 'Error'),
+                    React.createElement('p', {
+                        key: 'error-message'
+                    }, error)
+                ]),
+                
+                // Loading indicator
+                loading && React.createElement('div', {
+                    className: 'flex items-center justify-center p-12 bg-white rounded-lg shadow',
+                    key: 'loading'
+                }, [
+                    React.createElement('div', {
+                        className: 'animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600',
+                        key: 'spinner'
+                    }),
+                    React.createElement('span', {
+                        className: 'ml-3 text-lg font-medium text-gray-700',
+                        key: 'loading-text'
+                    }, 'Analyzing logs...')
+                ]),
+                
+                // Results
+                !loading && results && React.createElement('div', {
+                    id: 'results',
+                    key: 'results'
+                }, logType === 'firewall' && results.firewall_analysis 
+                    ? React.createElement(FirewallDashboard, { data: results.firewall_analysis })
+                    : [
+                        React.createElement(MetricsOverview, { 
+                            data: results.summary,
+                            key: 'metrics'
+                        }),
+                        React.createElement(HttpAnalysis, { 
+                            data: results.http_analysis,
+                            key: 'http'
+                        }),
+                        React.createElement(ErrorAnalysis, { 
+                            data: results.error_analysis,
+                            key: 'error'
+                        }),
+                        React.createElement(SecurityAnalysis, { 
+                            data: results.security_analysis,
+                            key: 'security'
+                        }),
+                        React.createElement(PerformanceAnalysis, { 
+                            data: results.performance_metrics,
+                            key: 'performance'
+                        }),
+                        React.createElement(TimeAnalysis, { 
+                            data: results.time_analysis,
+                            key: 'time'
+                        })
+                    ]
+                )
+            ]);
         };
+
+        // Initialize when the document is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            // Render the React app
+            ReactDOM.render(
+                React.createElement(App),
+                document.getElementById('root')
+            );
+        });
     </script>
 </body>
 </html>

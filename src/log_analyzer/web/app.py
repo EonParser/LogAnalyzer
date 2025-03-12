@@ -28,6 +28,7 @@ from ..processors.pipeline import FilterStep, Pipeline, ProcessingStep
 from ..processors.transformers import TransformerFactory
 from .enhanced_firewall_metrics import extract_firewall_metrics, classify_ip, get_service_name
 from .log_processor import LogProcessor
+from .field_detector import FieldDetector
 
 logging.basicConfig(level=logging.DEBUG)
 app = FastAPI(title="Log Analyzer API")
@@ -82,6 +83,7 @@ log_processor = LogProcessor(analyzer)
 class AnalysisRequest(BaseModel):
     parser: Optional[str] = None
     filters: Optional[List[str]] = None
+    filter_fields: Optional[Dict[str, List[str]]] = None 
 
 
 class AnalysisResponse(BaseModel):
@@ -96,7 +98,8 @@ async def analyze_logs(
     files: List[UploadFile] = File(...),
     parser: Optional[str] = Form(None),
     filters: Optional[str] = Form(None),
-    log_type: Optional[str] = Form("standard"),  # Add log_type parameter
+    filter_fields: Optional[str] = Form(None),
+    log_type: Optional[str] = Form("standard"),
 ):
     try:
         task_id = str(uuid.uuid4())
@@ -125,6 +128,15 @@ async def analyze_logs(
             else:
                 logging.error(f"Empty file content for {file.filename}")
 
+        # Parse filter_fields if provided
+        parsed_filter_fields = None
+        if filter_fields:
+            try:
+                parsed_filter_fields = json.loads(filter_fields)
+                logging.info(f"Parsed filter fields: {parsed_filter_fields}")
+            except json.JSONDecodeError:
+                logging.error(f"Invalid filter fields JSON: {filter_fields}")
+
         tasks[task_id] = {
             "status": "pending",
             "created_at": datetime.now(),
@@ -133,6 +145,7 @@ async def analyze_logs(
             "error": None,
             "temp_files": saved_files,
             "log_type": log_type,  # Store log_type
+            "filter_fields": parsed_filter_fields,  # Store filter_fields
         }
 
         # Choose default parser based on log type
@@ -144,6 +157,7 @@ async def analyze_logs(
             saved_files,
             parser or default_parser,
             filters.split(",") if filters else None,
+            parsed_filter_fields,  # Pass filter_fields to process_logs
             log_type,  # Pass log_type to process_logs
         )
 
@@ -162,6 +176,7 @@ async def process_logs(
     saved_files: List[dict], 
     parser_name: Optional[str], 
     filters: Optional[List[str]],
+    filter_fields: Optional[Dict[str, List[str]]] = None,
     log_type: str = "standard",  # Add log_type parameter
 ):
     """Process uploaded log files"""
@@ -181,25 +196,26 @@ async def process_logs(
                     except Exception as filter_err:
                         logging.warning(f"Failed to create filter from expression '{filter_expr}': {str(filter_err)}")
 
-            # Create appropriate transformer based on log type
-            transformer = None
+            # Add field-based filters
+            if filter_fields:
+                logging.info(f"Applying field filters: {filter_fields}")
+                for field_name, values in filter_fields.items():
+                    try:
+                        # Create a lambda function that checks if the field value is in the list
+                        filter_func = eval(
+                            f"lambda e: (hasattr(e, 'parsed_data') and "
+                            f"e.parsed_data.get('{field_name}') in {values})"
+                        )
+                        pipeline.add_step(FilterStep(f"field_filter_{field_name}", filter_func))
+                    except Exception as field_filter_err:
+                        logging.warning(f"Failed to create filter for field '{field_name}': {str(field_filter_err)}")
+
+            # Add different transformers based on log type
             if log_type == "firewall":
+                pipeline.add_step(TransformerFactory.create_security_transformer())
                 logging.info(f"Using security transformer for firewall logs")
-                transformer = TransformerFactory.create_security_transformer()
-                # Add the transformer as a step to the pipeline
-                class TransformerStep(ProcessingStep):
-                    def __init__(self, name, func):
-                        super().__init__(name)
-                        self.func = func
-                    
-                    def process(self, entry):
-                        return self.func(entry)
-                
-                pipeline.add_step(TransformerStep("security_transformer", transformer))
             else:
-                logging.info(f"Using standard transformer for logs")
-                transformer = TransformerFactory.create_standard_transformer()
-                pipeline.add_step(TransformerStep("standard_transformer", transformer))
+                pipeline.add_step(TransformerFactory.create_standard_transformer())
 
             # Process logs appropriately based on log type
             if log_type == "firewall":
