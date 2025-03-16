@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .field_detector import FieldDetector
 from ..core.analyzer import LogAnalyzer
 from ..parsers.base import LogEntry
 from ..processors.pipeline import FilterStep, Pipeline
@@ -13,6 +14,7 @@ class LogProcessor:
     def __init__(self, analyzer: LogAnalyzer):
         self.analyzer = analyzer
         self.logger = logging.getLogger(__name__)
+        self.field_detector = FieldDetector()
 
     def _process_entry(self, metrics: Dict[str, Any], entry: LogEntry) -> None:
         """Process a single log entry and update metrics"""
@@ -163,6 +165,7 @@ class LogProcessor:
         self.logger.info(f"Starting to process {len(files)} files")
         metrics = self._initialize_metrics()
         successful_files = 0
+        all_entries = []
 
         try:
             for file_info in files:
@@ -218,14 +221,40 @@ class LogProcessor:
             # Even if there were errors in processing, try to return results if we have any entries
             if metrics['total_entries'] > 0:
                 self.logger.info(f"Successfully processed {metrics['total_entries']} entries from {successful_files} files")
-                return self._prepare_combined_results(metrics)
+                
+                # Detect fields
+                detected_fields = {}
+                if all_entries:
+                    try:
+                        detected_fields = self.field_detector.detect_fields(all_entries)
+                        self.logger.info(f"Detected {len(detected_fields)} fields in the log entries")
+                    except Exception as e:
+                        self.logger.error(f"Error detecting fields: {str(e)}", exc_info=True)
+                
+                # Add detected fields to the results
+                results = self._prepare_combined_results(metrics)
+                results["detected_fields"] = detected_fields
+                return results
 
             if successful_files == 0:
                 available_parsers = list(self.analyzer.parser_factory._parsers.keys())
                 raise ValueError(f"No files were successfully processed. Available parsers: {', '.join(available_parsers)}")
 
             self.logger.info(f"Successfully processed {metrics['total_entries']} entries from {successful_files} files")
-            return self._prepare_combined_results(metrics)
+            
+            # Detect fields
+            detected_fields = {}
+            if all_entries:
+                try:
+                    detected_fields = self.field_detector.detect_fields(all_entries)
+                    self.logger.info(f"Detected {len(detected_fields)} fields in the log entries")
+                except Exception as e:
+                    self.logger.error(f"Error detecting fields: {str(e)}", exc_info=True)
+            
+            # Add detected fields to the results
+            results = self._prepare_combined_results(metrics)
+            results["detected_fields"] = detected_fields
+            return results
             
         except Exception as e:
             self.logger.error("Error in process_files", exc_info=True)
